@@ -81,17 +81,84 @@ function buscarPlacaEnSunarp(placa, notify) {
   );
 }
 
+// Copia de respaldo automática en el navegador + avisos visibles cuando la nube
+// no responde. La app SIEMPRE intenta la nube primero; si falla, el dato queda
+// seguro en este dispositivo (localStorage) y se vuelve a subir solo cuando la
+// conexión vuelve. Así nada se pierde aunque se corte el internet.
+let onSaveError = null;
+function setOnSaveError(fn) {
+  onSaveError = fn;
+}
+const pendientesDeSubir = new Set();
+
+function mirrorKey(key) {
+  return "lw-respaldo-" + key;
+}
+
+function mirrorRead(key) {
+  try {
+    const raw = localStorage.getItem(mirrorKey(key));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function mirrorWrite(key, value) {
+  try {
+    localStorage.setItem(mirrorKey(key), JSON.stringify(value));
+  } catch {
+    // el navegador puede rechazar el guardado local; no es fatal
+  }
+}
+
+function avisarFalloNube() {
+  if (typeof onSaveError === "function") {
+    try {
+      onSaveError(
+        "No se pudo guardar en la nube. Tus datos quedaron guardados en este dispositivo y se subirán solos cuando vuelva la conexión."
+      );
+    } catch {
+      // el aviso es solo informativo
+    }
+  }
+}
+
 function useStoredList(key, seed = []) {
   const [list, setList] = useState(null);
   const writingRef = useRef(false);
 
   const fetchLatest = async () => {
+    let res = null;
     try {
-      const res = await window.storage.get(key, false);
-      return res ? JSON.parse(res.value) : seed;
+      res = await window.storage.get(key, false);
     } catch {
-      return seed;
+      res = null;
     }
+    if (res) {
+      // Si quedó algo pendiente de subir, preferimos la copia local y la re-subimos.
+      if (!pendientesDeSubir.has(key)) return JSON.parse(res.value);
+      const local = mirrorRead(key);
+      try {
+        await window.storage.set(key, JSON.stringify(local || []), false);
+        pendientesDeSubir.delete(key);
+        return local || [];
+      } catch {
+        return local !== null ? local : JSON.parse(res.value);
+      }
+    }
+    // La fila aún no existe en la nube (o no se pudo leer): usamos la copia local.
+    const local = mirrorRead(key);
+    if (local !== null) {
+      try {
+        await window.storage.set(key, JSON.stringify(local), false);
+        pendientesDeSubir.delete(key);
+      } catch {
+        // aún sin conexión: se reintentará en el próximo chequeo
+      }
+      return local;
+    }
+    return seed;
   };
 
   useEffect(() => {
@@ -130,10 +197,13 @@ function useStoredList(key, seed = []) {
   const persist = async (next) => {
     writingRef.current = true;
     setList(next);
+    mirrorWrite(key, next);
     try {
       await window.storage.set(key, JSON.stringify(next), false);
+      pendientesDeSubir.delete(key);
     } catch {
-      // best-effort
+      pendientesDeSubir.add(key);
+      avisarFalloNube();
     } finally {
       writingRef.current = false;
     }
@@ -149,8 +219,38 @@ function useClientesRemote(seed = []) {
   const [list, setList] = useState(null);
   const writingRef = useRef(false);
 
+  const leerLegacy = async () => {
+    try {
+      const legacy = await window.storage.get("lw-clientes", false);
+      const antiguos = legacy ? JSON.parse(legacy.value) : [];
+      return Array.isArray(antiguos) && antiguos.length > 0 ? antiguos : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Si quedó algo pendiente de subir (ej. se cortó la conexión), tomamos la copia
+  // local como la verdad, la subimos completa y borramos de la nube lo que ya no
+  // existe. Así el dispositivo y la nube vuelven a quedar idénticos.
+  const resyncLocal = async (dataCloud) => {
+    const local = mirrorRead("clientes");
+    if (!Array.isArray(local)) return null;
+    try {
+      const localIds = new Set(local.map((c) => c.id));
+      const cloudIds = new Set((dataCloud || []).map((c) => c.id));
+      for (const c of local) await supabase.from("clientes").upsert(c);
+      for (const id of cloudIds) {
+        if (!localIds.has(id)) await supabase.from("clientes").delete().eq("id", id);
+      }
+      pendientesDeSubir.delete("clientes");
+      return local;
+    } catch {
+      return local;
+    }
+  };
+
   const fetchAll = async () => {
-    if (!supabase) return seed;
+    if (!supabase) return mirrorRead("clientes") || (await leerLegacy()) || seed;
     let data = null;
     let error = null;
     try {
@@ -160,29 +260,30 @@ function useClientesRemote(seed = []) {
     } catch (e) {
       error = e;
     }
-    if (!error && data && data.length > 0) return data;
-    // La tabla nueva está vacía o todavía no existe: buscamos si había clientes
-    // guardados en el sistema anterior (un bloque en kv_store) y los mostramos
-    // igual, para que nunca se vea "vacío" mientras la tabla nueva no esté lista.
-    try {
-      const legacy = await window.storage.get("lw-clientes", false);
-      const antiguos = legacy ? JSON.parse(legacy.value) : [];
-      if (Array.isArray(antiguos) && antiguos.length > 0) {
-        if (!error) {
-          for (const c of antiguos) {
-            try {
-              await supabase.from("clientes").upsert(c);
-            } catch {
-              // la tabla puede no existir todavía; se reintentará en la próxima carga
-            }
+    if (!error && data) {
+      if (pendientesDeSubir.has("clientes")) {
+        const local = await resyncLocal(data);
+        if (local) return local;
+        pendientesDeSubir.delete("clientes");
+        return data.length ? data : seed;
+      }
+      if (data.length > 0) return data;
+      // La nube está vacía: recuperamos la copia local (o el sistema antiguo).
+      const local = mirrorRead("clientes");
+      if (Array.isArray(local) && local.length > 0) {
+        for (const c of local) {
+          try {
+            await supabase.from("clientes").upsert(c);
+          } catch {
+            // se reintentará en la próxima carga
           }
         }
-        return antiguos;
+        return local;
       }
-    } catch {
-      // no había datos antiguos, o ya no están disponibles
+      return (await leerLegacy()) || seed;
     }
-    return data || seed;
+    // No se pudo leer la nube: usamos las copias locales / antiguas sin perder nada.
+    return mirrorRead("clientes") || (await leerLegacy()) || data || seed;
   };
 
   // Para las revisiones periódicas NO pedimos la foto (son el dato más pesado);
@@ -245,6 +346,7 @@ function useClientesRemote(seed = []) {
     writingRef.current = true;
     const prev = list || [];
     setList(next);
+    mirrorWrite("clientes", next);
     try {
       const prevById = Object.fromEntries(prev.map((c) => [c.id, c]));
       const nextIds = new Set(next.map((c) => c.id));
@@ -256,8 +358,10 @@ function useClientesRemote(seed = []) {
       for (const c of paraGuardar) {
         await supabase.from("clientes").upsert(c);
       }
+      pendientesDeSubir.delete("clientes");
     } catch {
-      // best-effort
+      pendientesDeSubir.add("clientes");
+      avisarFalloNube();
     } finally {
       writingRef.current = false;
     }
@@ -275,7 +379,34 @@ function useTableRemote(table, seed = [], legacyKey = null) {
   const writingRef = useRef(false);
 
   const fetchAll = async () => {
-    if (!supabase) return seed;
+    const mirrorK = "tabla:" + table;
+    const leerLegacy = async () => {
+      if (!legacyKey) return null;
+      try {
+        const legacy = await window.storage.get(legacyKey, false);
+        const antiguos = legacy ? JSON.parse(legacy.value) : [];
+        return Array.isArray(antiguos) && antiguos.length > 0 ? antiguos : null;
+      } catch {
+        return null;
+      }
+    };
+    const resyncLocal = async (dataCloud) => {
+      const local = mirrorRead(mirrorK);
+      if (!Array.isArray(local)) return null;
+      try {
+        const localIds = new Set(local.map((c) => c.id));
+        const cloudIds = new Set((dataCloud || []).map((c) => c.id));
+        for (const item of local) await supabase.from(table).upsert(item);
+        for (const id of cloudIds) {
+          if (!localIds.has(id)) await supabase.from(table).delete().eq("id", id);
+        }
+        pendientesDeSubir.delete(mirrorK);
+        return local;
+      } catch {
+        return local;
+      }
+    };
+    if (!supabase) return mirrorRead(mirrorK) || (await leerLegacy()) || seed;
     let data = null;
     let error = null;
     try {
@@ -285,31 +416,30 @@ function useTableRemote(table, seed = [], legacyKey = null) {
     } catch (e) {
       error = e;
     }
-    if (!error && data && data.length > 0) return data;
-    // La tabla nueva está vacía o todavía no existe: buscamos si había datos
-    // guardados en el sistema anterior (un bloque en kv_store) y los mostramos
-    // igual, para que nunca se vea "vacío" mientras la tabla nueva no esté lista.
-    if (legacyKey) {
-      try {
-        const legacy = await window.storage.get(legacyKey, false);
-        const antiguos = legacy ? JSON.parse(legacy.value) : [];
-        if (Array.isArray(antiguos) && antiguos.length > 0) {
-          if (!error) {
-            for (const item of antiguos) {
-              try {
-                await supabase.from(table).upsert(item);
-              } catch {
-                // la tabla puede no existir todavía; se reintentará en la próxima carga
-              }
-            }
-          }
-          return antiguos;
-        }
-      } catch {
-        // no había datos antiguos, o ya no están disponibles
+    if (!error && data) {
+      if (pendientesDeSubir.has(mirrorK)) {
+        const local = await resyncLocal(data);
+        if (local) return local;
+        pendientesDeSubir.delete(mirrorK);
+        return data.length ? data : seed;
       }
+      if (data.length > 0) return data;
+      const local = mirrorRead(mirrorK);
+      if (Array.isArray(local) && local.length > 0) {
+        for (const item of local) {
+          try {
+            await supabase.from(table).upsert(item);
+          } catch {
+            // se reintentará en la próxima carga
+          }
+        }
+        return local;
+      }
+      const legacy = await leerLegacy();
+      if (legacy) return legacy;
+      return seed;
     }
-    return data || seed;
+    return mirrorRead(mirrorK) || (await leerLegacy()) || data || seed;
   };
 
   useEffect(() => {
@@ -345,8 +475,10 @@ function useTableRemote(table, seed = [], legacyKey = null) {
 
   const persist = async (next) => {
     writingRef.current = true;
+    const mirrorK = "tabla:" + table;
     const prev = list || [];
     setList(next);
+    mirrorWrite(mirrorK, next);
     try {
       const prevById = Object.fromEntries(prev.map((c) => [c.id, c]));
       const nextIds = new Set(next.map((c) => c.id));
@@ -358,8 +490,10 @@ function useTableRemote(table, seed = [], legacyKey = null) {
       for (const c of paraGuardar) {
         await supabase.from(table).upsert(c);
       }
+      pendientesDeSubir.delete(mirrorK);
     } catch {
-      // best-effort
+      pendientesDeSubir.add(mirrorK);
+      avisarFalloNube();
     } finally {
       writingRef.current = false;
     }
@@ -474,6 +608,11 @@ export default function CarWashApp({ role = "admin" }) {
     setToast(msg);
     setTimeout(() => setToast(null), 2400);
   };
+
+  useEffect(() => {
+    setOnSaveError(() => notify);
+    return () => setOnSaveError(null);
+  }, []);
 
   const abiertas = useMemo(() => (tickets || []).filter((t) => t.estado === "abierto"), [tickets]);
   const cerradasHoy = useMemo(
