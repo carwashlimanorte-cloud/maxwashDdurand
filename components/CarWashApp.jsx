@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
-  Droplets, Users, Receipt, Wallet, Settings, Plus, Trash2, X, Sparkles, Car, Camera,
+  Droplets, Users, Receipt, Wallet, Settings, Plus, Trash2, X, Sparkles, Car,
   Store, AlertTriangle, Gift, CreditCard, Smartphone, Banknote, ClipboardList, ChevronDown, ChevronUp,
   ShoppingBag, Wrench, Barcode, Calendar, ChevronLeft, ChevronRight, BarChart3, Search,
 } from "lucide-react";
@@ -541,38 +541,6 @@ const inputCls =
 
 function EmptyState({ text }) {
   return <p className="text-sm text-slate-400 italic py-6 text-center">{text}</p>;
-}
-
-// Comprime la foto antes de guardarla (la reduce a un tamaño manejable), para que
-// nunca falle el guardado por fotos muy pesadas y para que la app cargue rápido
-// aunque haya cientos de clientes con foto.
-function fileToCompressedDataUrl(file, maxDim = 640, quality = 0.6) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > height && width > maxDim) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else if (height >= width && height > maxDim) {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      };
-      img.onerror = reject;
-      img.src = reader.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }
 
 // Solo cuentas cerradas (pagadas) cuentan para la promoción de fidelidad.
@@ -2025,27 +1993,10 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
   const vacio = { nombre: "", telefono: "", placa: "", vehiculo: "", foto: "" };
   const [form, setForm] = useState(vacio);
   const [editId, setEditId] = useState(null);
-  const [subiendoFoto, setSubiendoFoto] = useState(false);
-  const fileRef = useRef(null);
-
-  const onFoto = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setSubiendoFoto(true);
-    try {
-      const dataUrl = await fileToCompressedDataUrl(file);
-      setForm((f) => ({ ...f, foto: dataUrl }));
-    } catch {
-      notify("No se pudo cargar la foto");
-    } finally {
-      setSubiendoFoto(false);
-    }
-  };
 
   const limpiarForm = () => {
     setForm(vacio);
     setEditId(null);
-    if (fileRef.current) fileRef.current.value = "";
   };
 
   const guardar = async () => {
@@ -2100,15 +2051,6 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
           </Field>
           <Field label="Vehículo"><input className={inputCls} value={form.vehiculo} onChange={(e) => setForm({ ...form, vehiculo: e.target.value })} placeholder="Marca / modelo" /></Field>
         </div>
-        <Field label="Foto del carro">
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1.5 text-xs font-medium text-teal-700 border border-teal-300 rounded-lg px-3 py-2 cursor-pointer">
-              <Camera size={15} /> {subiendoFoto ? "Cargando…" : form.foto ? "Cambiar foto" : "Tomar / subir foto"}
-              <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFoto} disabled={subiendoFoto} />
-            </label>
-            {form.foto && <img src={form.foto} alt="Vehículo" className="w-12 h-12 rounded-lg object-cover border border-slate-200" />}
-          </div>
-        </Field>
         <button onClick={guardar} className="w-full bg-teal-600 text-white rounded-lg py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5">
           {editId ? "Guardar cambios" : (<><Plus size={16} /> Guardar cliente</>)}
         </button>
