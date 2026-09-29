@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Droplets, Users, Receipt, Wallet, Settings, Plus, Trash2, X, Sparkles, Car,
   Store, AlertTriangle, Gift, CreditCard, Smartphone, Banknote, ClipboardList, ChevronDown, ChevronUp,
-  ShoppingBag, Wrench, Barcode, Calendar, ChevronLeft, ChevronRight, BarChart3, Search,
+  ShoppingBag, Wrench, Barcode, Calendar, ChevronLeft, ChevronRight, BarChart3, Search, MessageCircle,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -1994,6 +1994,39 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
   const [form, setForm] = useState(vacio);
   const [editId, setEditId] = useState(null);
 
+  const MENSAJE_PROMO_DEFAULT =
+    "Hola {nombre}! En Lubriwash D'Durand tenemos una promoción especial esta semana para cuidar tu carro. ¡Ven y aprovecha, te esperamos!";
+  const [promoMsg, setPromoMsg] = useState(MENSAJE_PROMO_DEFAULT);
+
+  // Convierte el número a formato WhatsApp del Perú (+51), quitando espacios,
+  // guiones o el cero inicial.
+  const telParaWhatsApp = (tel) => {
+    const d = (tel || "").replace(/[^\d]/g, "");
+    if (!d) return null;
+    return "51" + (d.startsWith("0") ? d.slice(1) : d);
+  };
+
+  const enviarWhatsApp = (c) => {
+    const wa = telParaWhatsApp(c.telefono);
+    if (!wa) return notify("Este cliente no tiene teléfono");
+    const msg = promoMsg.replace(/\{nombre\}/g, c.nombre || "cliente");
+    window.open("https://wa.me/" + wa + "?text=" + encodeURIComponent(msg), "_blank", "noopener");
+  };
+
+  // Copia todos los teléfonos al pasar los números a WhatsApp, útil para crear
+  // una "lista de difusión" (comunidad) y mandar la promoción a todos de una vez.
+  const copiarNumeros = async () => {
+    const conTel = clientes.filter((c) => telParaWhatsApp(c.telefono));
+    if (!conTel.length) return notify("No hay clientes con teléfono guardado");
+    const lista = conTel.map((c) => `${c.nombre}: +${telParaWhatsApp(c.telefono)}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(lista);
+      notify("Lista copiada: pégala en WhatsApp y crea tu lista de difusión");
+    } catch {
+      notify("No se pudo copiar. Selecciona los números y usa Copiar en tu teléfono");
+    }
+  };
+
   const limpiarForm = () => {
     setForm(vacio);
     setEditId(null);
@@ -2056,6 +2089,25 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
         </button>
       </Card>
 
+      <Card className="p-4 space-y-3 bg-teal-50 border-teal-200">
+        <div className="flex items-center gap-2">
+          <MessageCircle size={17} className="text-teal-700" />
+          <h2 className="font-semibold text-sm text-teal-900">Promoción por WhatsApp</h2>
+        </div>
+        <p className="text-xs text-teal-800">
+          Edita el mensaje y usa {"{nombre}"} para que salga el nombre de cada cliente. Después toca el botón verde de WhatsApp en cada cliente (su chat se abre con el mensaje listo), o copia la lista de números para armar una lista de difusión.
+        </p>
+        <textarea
+          className="w-full rounded-lg border border-teal-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+          rows={3}
+          value={promoMsg}
+          onChange={(e) => setPromoMsg(e.target.value)}
+        />
+        <button onClick={copiarNumeros} className="w-full bg-teal-600 text-white rounded-lg py-2 text-sm font-semibold flex items-center justify-center gap-1.5">
+          <ClipboardList size={15} /> Copiar lista de números
+        </button>
+      </Card>
+
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-2 text-sm">Clientes ({clientes.length})</h2>
         {clientes.length === 0 ? (
@@ -2085,6 +2137,9 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
                       <span className="text-[10px] text-violet-600 font-medium">{n}/{CICLO_PROMO}</span>
                     </div>
                   </div>
+                  <button onClick={() => enviarWhatsApp(c)} className="text-[#25D366] hover:text-[#1da851] shrink-0" title="Enviar promoción por WhatsApp">
+                    <MessageCircle size={18} />
+                  </button>
                   <button onClick={() => editar(c)} className="text-slate-300 hover:text-teal-600 shrink-0">
                     <Settings size={16} />
                   </button>
