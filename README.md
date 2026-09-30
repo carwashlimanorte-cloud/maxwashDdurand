@@ -1,4 +1,4 @@
-# Lubriwash D'Durand — App en la nube
+# MaxWash D'Durand — App en la nube
 
 App de control para lavado de autos, tienda y cambio de aceite del negocio.
 Guardas todo en una base de datos real (Supabase) y la ves desde cualquier
@@ -16,12 +16,11 @@ Esta guía es para publicarla desde cero, en orden, sin necesidad de saber progr
 
 1. Entra a https://supabase.com y crea una cuenta gratuita (o inicia sesión).
 2. Crea una **organización nueva**: clic en tu avatar (arriba a la derecha) →
-   **New organization** → ponle un nombre (ej. "Lubriwash Local").
+   **New organization** → ponle un nombre (ej. "MaxWash Local").
    - OJO: el límite de proyectos gratis se cuenta por cuenta. Si ya tienes un
-     proyecto que NO usas (ej. el que se llamaba "Lubriwash"), bórralo antes
-     para no llegar al tope.
+     proyecto que NO usas, bórralo antes para no llegar al tope.
 3. Crea el proyecto: botón **New project**, elige la organización nueva, dale un
-   nombre (ej. "lubriwash") y una contraseña de base de datos segura (guárdala).
+   nombre (ej. "maxwash") y una contraseña de base de datos segura (guárdala).
 4. Espera a que se cree (1-2 minutos).
 
 ### Crear las tablas (SQL)
@@ -69,7 +68,7 @@ Esta guía es para publicarla desde cero, en orden, sin necesidad de saber progr
    - `NEXT_PUBLIC_APP_PASSWORD_LOCAL` → la clave del personal del local
    - Marca las 3 casillas **Environment** (Production, Preview y Development)
      en cada una.
-4. Dale **Deploy**. En 1-2 minutos obtienes un link tipo `lubriwash.vercel.app`:
+4. Dale **Deploy**. En 1-2 minutos obtienes un link tipo `maxwash.vercel.app`:
    ya es tu app en internet.
 
 > Si al publicar aparece un error, abre ese despliegue → **Build Logs** para ver
@@ -79,7 +78,7 @@ Esta guía es para publicarla desde cero, en orden, sin necesidad de saber progr
 
 ## Paso 4 — (Opcional) Poner tu propio dominio
 
-Compra un dominio (ej. `lubriwash.pe`) y en Vercel: **Project → Settings →
+Compra un dominio (ej. `maxwash.pe`) y en Vercel: **Project → Settings →
 Domains** → agrégalo y sigue las instrucciones de DNS. No es necesario para
 usar la app.
 
