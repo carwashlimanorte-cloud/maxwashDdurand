@@ -30,7 +30,7 @@ export default function Login({ onUnlock }) {
       <form onSubmit={entrar} className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4 shadow-lg">
         <div className="flex items-center gap-2 text-teal-700">
           <Droplets size={22} />
-          <h1 className="font-bold text-lg">Lubriwash D'Durand</h1>
+          <h1 className="font-bold text-lg">MaxWash D'Durand</h1>
         </div>
         <p className="text-sm text-slate-500">Ingresa la clave del negocio para ver el sistema.</p>
         <div className="relative">
