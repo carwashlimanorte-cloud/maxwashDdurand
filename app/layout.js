@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Lubriwash D'Durand",
+  title: "MaxWash D'Durand",
   description: "Control de lavados, tienda y cambio de aceite",
 };
 
