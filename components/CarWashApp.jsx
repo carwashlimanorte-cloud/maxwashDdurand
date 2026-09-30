@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Droplets, Users, Receipt, Wallet, Settings, Plus, Trash2, X, Sparkles, Car,
   Store, AlertTriangle, Gift, CreditCard, Smartphone, Banknote, ClipboardList, ChevronDown, ChevronUp,
-  ShoppingBag, Wrench, Barcode, Calendar, ChevronLeft, ChevronRight, BarChart3, Search, MessageCircle,
+  ShoppingBag, Wrench, Barcode, Calendar, ChevronLeft, ChevronRight, BarChart3, Search, MessageCircle, Star,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -34,6 +34,21 @@ const PAGOS = [
   { id: "yape", label: "Yape", icon: Smartphone },
   { id: "tarjeta", label: "Tarjeta", icon: CreditCard },
 ];
+
+// Reemplaza AQUI_VA_TU_LINK... con tus links reales cuando los tengas.
+const LINKS_NEGOCIO = {
+  google: "https://g.page/r/9963130498682903457/review",
+  tiktok: "https://www.tiktok.com/@maxwashddurand",
+};
+const MENSAJE_BIENVENIDA_DEFAULT = `Hola {nombre}! Gracias por preferir MaxWash D'Durand. Si quedaste conforme, déjanos tu reseña en Google Maps: ${LINKS_NEGOCIO.google} Y síguenos en TikTok para ver más ofertas: ${LINKS_NEGOCIO.tiktok}. Te esperamos pronto!`;
+
+// Convierte un teléfono a formato WhatsApp del Perú (+51), quitando espacios,
+// guiones o el cero inicial. Devuelve null si no hay un número válido.
+function telParaWhatsApp(tel) {
+  const d = (tel || "").replace(/[^\d]/g, "");
+  if (!d) return null;
+  return "51" + (d.startsWith("0") ? d.slice(1) : d);
+}
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const soles = (n) => `S/ ${Number(n || 0).toFixed(2)}`;
@@ -630,7 +645,7 @@ export default function CarWashApp({ role = "admin" }) {
             <Droplets size={18} />
           </div>
           <div className="min-w-0">
-            <h1 className="font-bold text-base leading-tight truncate">Lubriwash D'Durand</h1>
+            <h1 className="font-bold text-base leading-tight truncate">MaxWash D'Durand</h1>
             <p className="text-[11px] text-slate-400 leading-tight">Control de lavados y tienda</p>
           </div>
         </div>
@@ -701,6 +716,7 @@ export default function CarWashApp({ role = "admin" }) {
             focusTicketId={focusTicketId}
             clearFocus={() => setFocusTicketId(null)}
             clientes={clientes}
+            setClientes={setClientes}
             lavadores={lavadores}
             tipos={tipos}
             extras={extras}
@@ -1292,7 +1308,7 @@ function RespaldoDatos({ clientes = [], tickets = [], ventas = [], cierres = [] 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `lubriwash-respaldo-${hoy()}.json`;
+      a.download = `maxwash-respaldo-${hoy()}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1633,8 +1649,30 @@ function AbrirCuenta({ clientes, setClientes, lavadores, tipos, tickets, setTick
   );
 }
 
-function Cuentas({ abiertas, focusTicketId, clearFocus, clientes, lavadores, tipos, extras, productos, setProductos, repuestos, setRepuestos, tickets, setTickets, notify }) {
+function BienvenidaBanner({ pendiente, clientes, onEnviar, onCerrar }) {
+  const c = clientes.find((x) => x.id === pendiente.clienteId);
+  if (!c) return null;
+  return (
+    <Card className="p-4 space-y-2 bg-emerald-50 border-emerald-300">
+      <p className="text-sm font-semibold text-emerald-900">Cuenta cobrada: ¿mando la bienvenida a {c.nombre}?</p>
+      <p className="text-xs text-emerald-800">
+        Se abre WhatsApp con el mensaje listo pidiendo tu reseña en Google Maps y el seguimiento en TikTok. Solo la envías una vez por cliente.
+      </p>
+      <div className="flex gap-2">
+        <button onClick={onEnviar} className="flex-1 bg-emerald-600 text-white rounded-lg py-2 text-sm font-semibold flex items-center justify-center gap-1.5">
+          <MessageCircle size={15} /> Enviar bienvenida por WhatsApp
+        </button>
+        <button onClick={onCerrar} className="shrink-0 px-3 py-2 text-sm text-emerald-800 bg-white border border-emerald-300 rounded-lg">
+          Ahora no
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function Cuentas({ abiertas, focusTicketId, clearFocus, clientes, setClientes, lavadores, tipos, extras, productos, setProductos, repuestos, setRepuestos, tickets, setTickets, notify }) {
   const [abiertoId, setAbiertoId] = useState(null);
+  const [pendienteBienvenida, setPendienteBienvenida] = useState(null);
 
   useEffect(() => {
     if (focusTicketId) {
@@ -1643,17 +1681,37 @@ function Cuentas({ abiertas, focusTicketId, clearFocus, clientes, lavadores, tip
     }
   }, [focusTicketId]);
 
+  const onCobrado = (t) => {
+    const c = clientes.find((x) => x.id === t.clienteId);
+    if (c && telParaWhatsApp(c.telefono) && !c.saludoEnviado) {
+      setPendienteBienvenida({ clienteId: c.id, hora: Date.now() });
+    }
+  };
+
+  const enviarBienvenida = () => {
+    const c = clientes.find((x) => x.id === pendienteBienvenida.clienteId);
+    if (!c) return;
+    const wa = telParaWhatsApp(c.telefono);
+    const msg = MENSAJE_BIENVENIDA_DEFAULT.replace(/\{nombre\}/g, c.nombre || "cliente");
+    window.open("https://wa.me/" + wa + "?text=" + encodeURIComponent(msg), "_blank", "noopener");
+    setClientes(clientes.map((x) => (x.id === c.id ? { ...x, saludoEnviado: true } : x)));
+    setPendienteBienvenida(null);
+  };
+
   if (abiertas.length === 0) {
     return (
-      <Card className="p-8 text-center">
-        <ClipboardList className="mx-auto mb-2 text-slate-300" size={28} />
-        <p className="text-sm text-slate-400">No hay cuentas abiertas. Ábrelas desde "Abrir cuenta" cuando llegue un cliente.</p>
-      </Card>
+      <div className="space-y-3">
+        {pendienteBienvenida && <BienvenidaBanner pendiente={pendienteBienvenida} clientes={clientes} onEnviar={enviarBienvenida} onCerrar={() => setPendienteBienvenida(null)} />}
+        <Card className="p-6 text-center text-sm">
+          <p className="text-slate-400">No hay cuentas abiertas. Ábrelas desde "Abrir cuenta" cuando llegue un cliente.</p>
+        </Card>
+      </div>
     );
   }
 
   return (
     <div className="space-y-3">
+      {pendienteBienvenida && <BienvenidaBanner pendiente={pendienteBienvenida} clientes={clientes} onEnviar={enviarBienvenida} onCerrar={() => setPendienteBienvenida(null)} />}
       {abiertas.map((t) => (
         <CuentaCard
           key={t.id}
@@ -1670,6 +1728,7 @@ function Cuentas({ abiertas, focusTicketId, clearFocus, clientes, lavadores, tip
           setRepuestos={setRepuestos}
           tickets={tickets}
           setTickets={setTickets}
+          onCobrado={onCobrado}
           notify={notify}
         />
       ))}
@@ -1677,7 +1736,7 @@ function Cuentas({ abiertas, focusTicketId, clearFocus, clientes, lavadores, tip
   );
 }
 
-function CuentaCard({ ticket, expanded, onToggle, clientes, lavadores, tipos, extras, productos, setProductos, repuestos, setRepuestos, tickets, setTickets, notify }) {
+function CuentaCard({ ticket, expanded, onToggle, clientes, lavadores, tipos, extras, productos, setProductos, repuestos, setRepuestos, tickets, setTickets, onCobrado, notify }) {
   const cliente = clientes.find((c) => c.id === ticket.clienteId);
   const tipo = tipos.find((t) => t.id === ticket.tipoId);
   const extrasSel = extras.filter((e) => (ticket.extraIds || []).includes(e.id));
@@ -1782,6 +1841,7 @@ function CuentaCard({ ticket, expanded, onToggle, clientes, lavadores, tipos, ex
       )
     );
     notify(esGratis ? "¡Cuenta cobrada — lavada gratis por promoción!" : "Cuenta cobrada");
+    onCobrado(ticket);
   };
 
   return (
@@ -1995,16 +2055,9 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
   const [editId, setEditId] = useState(null);
 
   const MENSAJE_PROMO_DEFAULT =
-    "Hola {nombre}! En Lubriwash D'Durand tenemos una promoción especial esta semana para cuidar tu carro. ¡Ven y aprovecha, te esperamos!";
+    "Hola {nombre}! En MaxWash D'Durand tenemos una promoción especial esta semana para cuidar tu carro. ¡Ven y aprovecha, te esperamos!";
   const [promoMsg, setPromoMsg] = useState(MENSAJE_PROMO_DEFAULT);
-
-  // Convierte el número a formato WhatsApp del Perú (+51), quitando espacios,
-  // guiones o el cero inicial.
-  const telParaWhatsApp = (tel) => {
-    const d = (tel || "").replace(/[^\d]/g, "");
-    if (!d) return null;
-    return "51" + (d.startsWith("0") ? d.slice(1) : d);
-  };
+  const [bienvenidaMsg, setBienvenidaMsg] = useState(MENSAJE_BIENVENIDA_DEFAULT);
 
   const enviarWhatsApp = (c) => {
     const wa = telParaWhatsApp(c.telefono);
@@ -2027,9 +2080,23 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
     }
   };
 
+  const copiarResena = async () => {
+    try {
+      await navigator.clipboard.writeText(LINKS_NEGOCIO.google);
+      notify("Link de reseña copiado: envíaselo y el cliente llega directo a escribir la reseña");
+    } catch {
+      notify("No se pudo copiar el link");
+    }
+  };
+
   const limpiarForm = () => {
     setForm(vacio);
     setEditId(null);
+  };
+
+  const cambiarSegmento = async (c, segmento) => {
+    await setClientes(clientes.map((x) => (x.id === c.id ? { ...x, segmento } : x)));
+    notify(segmento ? `Cliente marcado como ${segmento}` : "Grupo quitado");
   };
 
   const guardar = async () => {
@@ -2103,8 +2170,25 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
           value={promoMsg}
           onChange={(e) => setPromoMsg(e.target.value)}
         />
+        <p className="text-xs font-medium text-teal-900 mt-1">Mensaje de bienvenida (cliente nuevo)</p>
+        <textarea
+          className="w-full rounded-lg border border-teal-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+          rows={4}
+          value={bienvenidaMsg}
+          onChange={(e) => setBienvenidaMsg(e.target.value)}
+        />
+        <p className="text-[11px] text-teal-700">
+          La bienvenida se envía al cobrar la cuenta del cliente: pide tu reseña en Google Maps y que te sigan en TikTok. Puedes usarla en la lista de clientes con el botón verde, o se ofrecerá sola al cobrar una cuenta.
+        </p>
+        <div className="rounded-lg bg-white border border-teal-200 p-2 text-[11px] text-teal-800">
+          <p className="font-medium mb-1">Marca a cada cliente como grupo A, B o C</p>
+          <p>Elige el grupo en la lista de clientes (junto a cada nombre) para enviar ofertas distintas a cada grupo.</p>
+        </div>
         <button onClick={copiarNumeros} className="w-full bg-teal-600 text-white rounded-lg py-2 text-sm font-semibold flex items-center justify-center gap-1.5">
           <ClipboardList size={15} /> Copiar lista de números
+        </button>
+        <button onClick={copiarResena} className="w-full bg-white border border-teal-300 text-teal-700 rounded-lg py-2 text-sm font-semibold flex items-center justify-center gap-1.5">
+          <Star size={15} /> Copiar link de reseña (Google)
         </button>
       </Card>
 
@@ -2126,7 +2210,22 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium text-slate-800 truncate">{c.nombre}</p>
+                    <p className="font-medium text-slate-800 truncate flex items-center">
+                      {c.nombre}
+                      {c.segmento && (
+                        <span
+                          className={`ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            c.segmento === "A"
+                              ? "bg-violet-100 text-violet-700"
+                              : c.segmento === "B"
+                              ? "bg-blue-100 text-blue-700"
+                              : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
+                          {c.segmento}
+                        </span>
+                      )}
+                    </p>
                     <p className="text-xs text-slate-400 truncate">
                       {[c.placa, c.vehiculo, c.telefono].filter(Boolean).join(" · ") || "Sin datos adicionales"}
                     </p>
@@ -2140,6 +2239,17 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
                   <button onClick={() => enviarWhatsApp(c)} className="text-[#25D366] hover:text-[#1da851] shrink-0" title="Enviar promoción por WhatsApp">
                     <MessageCircle size={18} />
                   </button>
+                  <select
+                    value={c.segmento || ""}
+                    onChange={(e) => cambiarSegmento(c, e.target.value)}
+                    className="shrink-0 rounded-lg border border-slate-200 text-xs px-1 py-1.5 text-slate-600 focus:outline-none"
+                    title="Marcar grupo A, B o C"
+                  >
+                    <option value="">Grupo</option>
+                    <option value="A">A - Fiel</option>
+                    <option value="B">B - Regular</option>
+                    <option value="C">C - Ocasional</option>
+                  </select>
                   <button onClick={() => editar(c)} className="text-slate-300 hover:text-teal-600 shrink-0">
                     <Settings size={16} />
                   </button>
