@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Droplets, Users, Receipt, Wallet, Settings, Plus, Trash2, X, Sparkles, Car,
   Store, AlertTriangle, Gift, CreditCard, Smartphone, Banknote, ClipboardList, ChevronDown, ChevronUp,
-  ShoppingBag, Wrench, Barcode, Calendar, ChevronLeft, ChevronRight, BarChart3, Search, MessageCircle, Star,
+  ShoppingBag, Wrench, Barcode, Calendar, ChevronLeft, ChevronRight, BarChart3, Search, MessageCircle, Star, FileText, Check, Tag, Lock,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -19,6 +19,8 @@ const KEYS = {
   ventas: "lw-ventas",
   repuestos: "lw-repuestos",
   cierres: "lw-cierres",
+  cotizaciones: "lw-cotizaciones",
+  configCot: "lw-config-cotizacion",
 };
 
 const DEFAULT_TIPOS = [
@@ -27,6 +29,217 @@ const DEFAULT_TIPOS = [
 ];
 
 const CATEGORIAS_ACEITE = ["Tipo de aceite", "Filtro de motor", "Filtro de aire acondicionado", "Filtro de aceite"];
+
+// Compara texto sin tildes y en minúsculas, para que al buscar "hilux" encuentre
+// "Hilux" y "Hídux".
+function norm(s) {
+  return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+const TIPOS_VEHICULO = [
+  { id: "auto", nombre: "Auto" },
+  { id: "camioneta", nombre: "Camioneta" },
+  { id: "suv", nombre: "SUV" },
+  { id: "van", nombre: "Van / furgón" },
+];
+
+// Catálogo de vehículos con la capacidad aproximada de aceite (litros). Son
+// valores de referencia: el dueño los corrige y añade los que quiera desde la
+// app, y lo que corrija se guarda.
+const veh = (marca, modelo, anio, litros, tipo) => ({ id: `${marca}|${modelo}|${anio}`, marca, modelo, anio, litros, tipo });
+const VEHICULOS_INICIALES = [
+  // Autos
+  veh("Toyota", "Etios 1.5", "2012-2017", 3.5, "auto"),
+  veh("Toyota", "Yaris 1.3", "2012-2020", 3.2, "auto"),
+  veh("Toyota", "Yaris 1.5", "2018-2022", 4.5, "auto"),
+  veh("Toyota", "Corolla 1.6", "2004-2014", 4.0, "auto"),
+  veh("Toyota", "Corolla 1.8", "2015-2022", 4.4, "auto"),
+  veh("Toyota", "Prius", "2015-2022", 4.5, "auto"),
+  veh("Toyota", "Probox 1.5", "2014-2022", 4.0, "auto"),
+  veh("Toyota", "Succeed 1.5", "2015-2022", 4.0, "auto"),
+  veh("Toyota", "Sienta 1.5", "2016-2022", 4.0, "auto"),
+  veh("Toyota", "Avanza 1.5", "2017-2022", 4.4, "auto"),
+  veh("Honda", "Fit 1.5", "2014-2022", 4.1, "auto"),
+  veh("Honda", "Civic 1.8", "2016-2022", 4.4, "auto"),
+  veh("Honda", "City 1.5", "2016-2022", 4.0, "auto"),
+  veh("Hyundai", "Accent 1.3", "2012-2020", 3.5, "auto"),
+  veh("Hyundai", "i10", "2014-2022", 3.5, "auto"),
+  veh("Hyundai", "Elantra 1.6", "2016-2022", 3.6, "auto"),
+  veh("Hyundai", "HB20 1.6", "2015-2022", 3.8, "auto"),
+  veh("Hyundai", "Creta 1.5", "2020-2022", 3.8, "suv"),
+  veh("Hyundai", "Tucson 2.0", "2015-2022", 4.6, "suv"),
+  veh("Kia", "Rio 1.4", "2013-2020", 3.5, "auto"),
+  veh("Kia", "Forte 1.6", "2016-2022", 3.8, "auto"),
+  veh("Kia", "K3", "2016-2022", 3.8, "auto"),
+  veh("Kia", "Seltos 1.6", "2020-2022", 3.8, "suv"),
+  veh("Kia", "Sportage 2.0", "2016-2022", 4.6, "suv"),
+  veh("Nissan", "March 1.6", "2012-2022", 4.0, "auto"),
+  veh("Nissan", "Versa 1.6", "2014-2022", 4.4, "auto"),
+  veh("Nissan", "Sentra 2.0", "2017-2022", 4.4, "auto"),
+  veh("Nissan", "Tiida 1.6", "2012-2016", 4.0, "auto"),
+  veh("Nissan", "Almera 1.6", "2014-2019", 4.0, "auto"),
+  veh("Chevrolet", "Onix 1.8", "2015-2022", 3.6, "auto"),
+  veh("Chevrolet", "Sail 1.8", "2015-2022", 3.7, "auto"),
+  veh("Chevrolet", "Spark 1.0", "2012-2022", 3.0, "auto"),
+  veh("Chevrolet", "Tracker", "2020-2022", 3.6, "suv"),
+  veh("Chevrolet", "Captiva 2.0", "2015-2022", 4.5, "suv"),
+  veh("Mitsubishi", "Lancer 1.6", "2010-2016", 4.3, "auto"),
+  veh("Subaru", "Impreza 1.8", "2015-2022", 4.0, "auto"),
+  veh("Suzuki", "Swift 1.3", "2012-2022", 3.0, "auto"),
+  veh("Geely", "CK 1.5", "2012-2022", 3.5, "auto"),
+  veh("Geely", "GX7 2.0", "2015-2022", 4.5, "suv"),
+  veh("Chery", "Tiggo 2.0", "2015-2022", 4.5, "suv"),
+  veh("Great Wall", "Haval H6 2.0", "2015-2022", 4.5, "suv"),
+  veh("Volkswagen", "Gol 1.0", "2010-2022", 3.0, "auto"),
+  veh("Volkswagen", "Jetta 1.6", "2012-2022", 4.0, "auto"),
+  veh("Audi", "A3 1.4", "2014-2022", 4.5, "auto"),
+  veh("Audi", "A4 2.0", "2015-2022", 5.0, "auto"),
+  veh("BMW", "Serie 3 (320i)", "2015-2022", 5.0, "auto"),
+  veh("Mercedes", "C200", "2015-2022", 5.5, "auto"),
+  // SUVs
+  veh("Toyota", "RAV4 2.0", "2015-2022", 4.6, "suv"),
+  veh("Toyota", "RAV4 2.5", "2019-2022", 4.8, "suv"),
+  veh("Toyota", "Corolla Cross 2.0", "2021-2022", 4.4, "suv"),
+  veh("Toyota", "Rush 1.5", "2018-2022", 4.8, "suv"),
+  veh("Jeep", "Compass 2.0", "2017-2022", 4.5, "suv"),
+  veh("Jeep", "Renegade 1.8", "2015-2022", 4.5, "suv"),
+  veh("Nissan", "Kicks 1.6", "2017-2022", 4.4, "suv"),
+  veh("Nissan", "X-Trail 2.0", "2015-2022", 4.6, "suv"),
+  veh("Mitsubishi", "Outlander 2.0", "2015-2022", 4.6, "suv"),
+  veh("Subaru", "Forester 2.0", "2015-2022", 4.6, "suv"),
+  veh("Volkswagen", "Tiguan 2.0", "2015-2022", 4.6, "suv"),
+  veh("Suzuki", "Vitara 1.4", "2015-2022", 3.0, "suv"),
+  veh("Honda", "CR-V 1.5", "2017-2022", 4.4, "suv"),
+  veh("Ford", "EcoSport 1.5", "2015-2022", 4.0, "suv"),
+  // Camionetas
+  veh("Toyota", "Hilux 2.0", "2015-2022", 8.0, "camioneta"),
+  veh("Toyota", "Hilux 2.4", "2015-2022", 8.4, "camioneta"),
+  veh("Toyota", "Hilux 2.7", "2015-2022", 8.3, "camioneta"),
+  veh("Toyota", "Hilux 2.8", "2015-2022", 8.5, "camioneta"),
+  veh("Toyota", "Hilux SW4 2.8", "2017-2022", 8.5, "camioneta"),
+  veh("Toyota", "Fortuner 2.7", "2011-2022", 8.0, "camioneta"),
+  veh("Ford", "Ranger 2.0", "2015-2022", 8.0, "camioneta"),
+  veh("Ford", "Ranger 2.2", "2015-2022", 8.0, "camioneta"),
+  veh("Ford", "Ranger 3.2", "2015-2022", 8.5, "camioneta"),
+  veh("Mitsubishi", "Pajero Sport 2.5", "2015-2022", 8.0, "camioneta"),
+  veh("Mitsubishi", "Pajero Sport 3.0", "2015-2022", 8.5, "camioneta"),
+  veh("Nissan", "Navara 2.5", "2015-2022", 8.0, "camioneta"),
+  veh("Nissan", "Navara 3.0", "2015-2022", 8.5, "camioneta"),
+  veh("Chevrolet", "S10 / D-Max 2.5", "2015-2022", 8.0, "camioneta"),
+  veh("Great Wall", "Wingle 2.0", "2015-2022", 7.5, "camioneta"),
+  veh("JMC", "V-Series 2.0", "2015-2022", 7.5, "camioneta"),
+  // Vans y furgones
+  veh("Toyota", "Hiace 2.5", "2014-2022", 8.0, "van"),
+  veh("Toyota", "Hiace 2.8", "2019-2022", 8.5, "van"),
+  veh("Isuzu", "Elf 3.1", "2014-2022", 7.5, "van"),
+  veh("Mercedes", "Sprinter 3.0", "2015-2022", 6.0, "van"),
+  veh("Hyundai", "H100 2.5", "2014-2022", 8.0, "van"),
+  veh("Nissan", "Caravan 2.5", "2015-2022", 8.0, "van"),
+];
+
+// Precios y catálogos de las cotizaciones de aceite. Son valores de ejemplo:
+// el dueño los edita desde la app, en la pestaña "Precios" (solo administrador)
+// y quedan guardados en la nube.
+const CONFIG_COT_DEFAULT = {
+  utilidad: 10,
+  // "completo": se cobra el número de envases completos que cubren los litros.
+  // "proporcional": se cobra solo por los litros que realmente lleva el carro.
+  modoEnvase: "completo",
+  tiposVehiculo: TIPOS_VEHICULO,
+  planes: [
+    {
+      id: "basico",
+      nombre: "Cambio de aceite básico",
+      extra: { auto: 90, camioneta: 100, suv: 120, van: 130 },
+      incluye:
+        "Cambio de aceite, cambio de filtro de aceite, pulverizado de motor, lavado, mano de obra, limpieza de filtro de motor y limpieza de filtro de aire acondicionado.",
+    },
+    {
+      id: "express",
+      nombre: "Mantenimiento express",
+      extra: { auto: 160, camioneta: 190, suv: 200, van: 210 },
+      incluye:
+        "Todo el básico + cambio de filtro de motor, cambio de filtro de aire acondicionado, lavado de chasis, revisión de frenos y suspensión, revisión del líquido de freno, relleno de limpiaparabrisas y lavado de guardafangos.",
+    },
+  ],
+  aceites: [
+    { id: "o1", nombre: "10W30 Castrol", capacidad: 4, costo: 165 },
+    { id: "o2", nombre: "10W30 Mobil Mineral", capacidad: 4, costo: 100 },
+    { id: "o3", nombre: "10W30 Shell", capacidad: 4, costo: 165 },
+    { id: "o4", nombre: "10W30 Liqui Moly Special Tec", capacidad: 4, costo: 205 },
+    { id: "o5", nombre: "10W30 Liqui Moly Molygen", capacidad: 4, costo: 225 },
+    { id: "o6", nombre: "10W30 Valvoline 4L", capacidad: 4, costo: 125 },
+    { id: "o7", nombre: "10W30 Valvoline 5L", capacidad: 5, costo: 155 },
+    { id: "o8", nombre: "10W30 Hyundai 6700", capacidad: 4, costo: 90 },
+    { id: "o9", nombre: "10W30 Valvoline Semisintético 4L", capacidad: 4, costo: 105 },
+    { id: "o10", nombre: "20W50 Castrol", capacidad: 4, costo: 100 },
+    { id: "o11", nombre: "20W50 Shell", capacidad: 4, costo: 100 },
+    { id: "o12", nombre: "20W50 Mobil", capacidad: 4, costo: 100 },
+    { id: "o13", nombre: "20W50 Vistony", capacidad: 4, costo: 70 },
+    { id: "o14", nombre: "20W50 Liqui Moly 5L", capacidad: 5, costo: 185 },
+    { id: "o15", nombre: "20W50 Valvoline Mineral", capacidad: 4, costo: 85 },
+    { id: "o16", nombre: "20W50 Valvoline Sintético", capacidad: 4, costo: 105 },
+    { id: "o17", nombre: "20W50 Hyundai", capacidad: 4, costo: 90 },
+    { id: "o18", nombre: "5W30 Liqui Moly Long Time", capacidad: 4, costo: 285 },
+    { id: "o19", nombre: "5W30 Liqui Moly Top Tec 4300", capacidad: 4, costo: 285 },
+    { id: "o20", nombre: "5W30 Castrol Edge", capacidad: 4, costo: 285 },
+    { id: "o21", nombre: "5W30 Castrol Magnatec", capacidad: 4, costo: 175 },
+    { id: "o22", nombre: "5W30 Shell Ultra Sintético", capacidad: 4, costo: 225 },
+    { id: "o23", nombre: "5W30 Shell HX8 Sintético", capacidad: 4, costo: 185 },
+    { id: "o24", nombre: "5W30 Shell HX7 Semisintético", capacidad: 4, costo: 165 },
+    { id: "o25", nombre: "5W30 Mobil 1", capacidad: 4, costo: 205 },
+    { id: "o26", nombre: "5W30 Mobil Super 3000", capacidad: 4, costo: 205 },
+    { id: "o27", nombre: "5W30 Vistony Sintético", capacidad: 4, costo: 105 },
+    { id: "o28", nombre: "5W30 Hyundai Sintético", capacidad: 4, costo: 105 },
+    { id: "o29", nombre: "10W40 Liqui Moly Molygen 4L", capacidad: 4, costo: 225 },
+    { id: "o30", nombre: "10W40 Shell", capacidad: 4, costo: 165 },
+    { id: "o31", nombre: "10W40 Mobil", capacidad: 4, costo: 165 },
+    { id: "o32", nombre: "10W40 Castrol", capacidad: 4, costo: 165 },
+    { id: "o33", nombre: "10W40 Valvoline 5L", capacidad: 5, costo: 155 },
+    { id: "o34", nombre: "10W40 Hyundai 6800 Full Sintético", capacidad: 4, costo: 105 },
+    { id: "o35", nombre: "10W40 Hyundai 6700 Semi", capacidad: 4, costo: 90 },
+    { id: "o36", nombre: "10W40 Vistony", capacidad: 4, costo: 95 },
+    { id: "o37", nombre: "25W60 Mobil", capacidad: 4, costo: 95 },
+    { id: "o38", nombre: "25W60 Shell", capacidad: 4, costo: 100 },
+    { id: "o39", nombre: "25W60 Castrol", capacidad: 4, costo: 85 },
+    { id: "o40", nombre: "25W60 Valvoline", capacidad: 4, costo: 70 },
+    { id: "o41", nombre: "25W60 Vistony", capacidad: 4, costo: 85 },
+    { id: "o42", nombre: "15W40 Hyundai 4L", capacidad: 4, costo: 90 },
+    { id: "o43", nombre: "15W40 Hyundai 6L", capacidad: 6, costo: 135 },
+    { id: "o44", nombre: "15W40 Vistony", capacidad: 4, costo: 85 },
+    { id: "o45", nombre: "15W40 Valvoline", capacidad: 4, costo: 95 },
+    { id: "o46", nombre: "15W40 Mobil 6L", capacidad: 6, costo: 145 },
+    { id: "o47", nombre: "15W40 Castrol 6L", capacidad: 6, costo: 145 },
+    { id: "o48", nombre: "15W40 Mobil 4L", capacidad: 4, costo: 115 },
+    { id: "o49", nombre: "15W40 Castrol 4L", capacidad: 4, costo: 105 },
+  ],
+  extras: [{ id: "x1", nombre: "Aditivo / revitalizador", precio: 20 }],
+  vehiculos: VEHICULOS_INICIALES,
+};
+
+// Precio de venta de un envase de aceite: costo + utilidad, siempre redondeado
+// a múltiplo de 10. Ej: 165 + 10% = 181.5 -> 180.
+function precioVentaEnvase(costo, utilidad) {
+  const conUtilidad = Number(costo || 0) * (1 + Number(utilidad || 0) / 100);
+  return Math.round(conUtilidad / 10) * 10;
+}
+
+// Agrupa los aceites por la viscosidad con la que empiezan (10W30, 20W50...),
+// para que la lista no sea una sola lista interminable en el selector.
+function gruposAceites(aceites) {
+  const grupos = [];
+  const index = {};
+  for (const a of aceites || []) {
+    const m = String(a.nombre || "").match(/^\d+W\d+/i);
+    const g = m ? m[0].toUpperCase() : "Otros";
+    if (!index[g]) {
+      index[g] = { grupo: g, aceites: [] };
+      grupos.push(index[g]);
+    }
+    index[g].aceites.push(a);
+  }
+  return grupos;
+}
 
 const CICLO_PROMO = 7;
 const PAGOS = [
@@ -583,6 +796,8 @@ export default function CarWashApp({ role = "admin" }) {
   const [ventas, setVentas] = useTableRemote("ventas", [], KEYS.ventas);
   const [repuestos, setRepuestos] = useStoredList(KEYS.repuestos, []);
   const [cierres, setCierres] = useStoredList(KEYS.cierres, []);
+  const [cotizaciones, setCotizaciones] = useStoredList(KEYS.cotizaciones, []);
+  const [configCotList, setConfigCotList] = useStoredList(KEYS.configCot, [CONFIG_COT_DEFAULT]);
 
   const loading = [clientes, gastos, lavadores, tipos, extras, tickets, productos, ventas, repuestos, cierres].some((l) => l === null);
 
@@ -631,6 +846,8 @@ export default function CarWashApp({ role = "admin" }) {
     { id: "caja", label: "Cierre de caja", icon: Receipt },
     ...(isAdmin ? [{ id: "historial", label: "Historial", icon: Calendar }] : []),
     { id: "clientes", label: "Clientes", icon: Users },
+    { id: "cotizaciones", label: "Cotizaciones", icon: FileText },
+    ...(isAdmin ? [{ id: "precios", label: "Precios", icon: Tag }] : []),
     { id: "tienda", label: "Tienda", icon: Store },
     { id: "aceite", label: "Cambio de aceite", icon: Wrench },
     { id: "gastos", label: "Gastos", icon: Wallet },
@@ -749,6 +966,20 @@ export default function CarWashApp({ role = "admin" }) {
         )}
         {tab === "clientes" && (
           <Clientes clientes={clientes} setClientes={setClientes} tickets={tickets} notify={notify} />
+        )}
+        {tab === "cotizaciones" && (
+          <Cotizaciones
+            clientes={clientes}
+            cotizaciones={cotizaciones}
+            setCotizaciones={setCotizaciones}
+            configCotList={configCotList}
+            esAdmin={isAdmin}
+            irAPrecios={() => setTab("precios")}
+            notify={notify}
+          />
+        )}
+        {tab === "precios" && isAdmin && (
+          <PreciosAdmin configCotList={configCotList} setConfigCotList={setConfigCotList} notify={notify} />
         )}
         {tab === "tienda" && (
           <Tienda productos={productos} setProductos={setProductos} ventas={ventas} setVentas={setVentas} notify={notify} isAdmin={isAdmin} />
@@ -2259,6 +2490,715 @@ function Clientes({ clientes, setClientes, tickets, notify }) {
                 </li>
               );
             })}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function EditarListaPrecios({ titulo, items, campo, config, setConfig, nota }) {
+  const esAceite = campo === "aceites";
+  const campoPrecio = esAceite ? "costo" : "precio";
+  const update = (nuevos) => setConfig({ ...config, [campo]: nuevos });
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-2 space-y-2">
+      <p className="text-xs font-semibold text-slate-700">
+        {titulo} <span className="font-normal text-slate-400">({esAceite ? "tu costo por litro" : "precio de venta"})</span>
+      </p>
+      {nota && <p className="text-[11px] text-slate-400 -mt-1">{nota}</p>}
+      {items.map((it, i) => (
+        <div key={it.id} className="flex gap-1.5 items-center">
+          <input
+            className={inputCls}
+            value={it.nombre}
+            onChange={(e) => update(items.map((x, j) => (j === i ? { ...x, nombre: e.target.value } : x)))}
+            placeholder="Nombre"
+          />
+          <input
+            className={`${inputCls} w-20`}
+            type="number"
+            step="0.01"
+            value={it[campoPrecio]}
+            onChange={(e) => update(items.map((x, j) => (j === i ? { ...x, [campoPrecio]: e.target.value } : x)))}
+          />
+          <button onClick={() => update(items.filter((_, j) => j !== i))} className="text-slate-300 hover:text-rose-500 shrink-0">
+            <Trash2 size={15} />
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={() => update([...items, { id: uid(), nombre: "", [campoPrecio]: "" }])}
+        className="text-xs text-teal-700 font-medium flex items-center gap-1"
+      >
+        <Plus size={13} /> Agregar
+      </button>
+    </div>
+  );
+}
+
+function EditarListaAceites({ aceites, utilidad, setConfig, buscar = "" }) {
+  const update = (nuevos) => setConfig((cfg) => ({ ...cfg, aceites: nuevos }));
+  const patch = (id, campo, valor) => update((aceites || []).map((x) => (x.id === id ? { ...x, [campo]: valor } : x)));
+  const quitar = (id) => update((aceites || []).filter((x) => x.id !== id));
+  const visibles = useMemo(() => {
+    const t = norm(buscar.trim());
+    return t ? (aceites || []).filter((a) => norm(a.nombre).includes(t)) : aceites || [];
+  }, [aceites, buscar]);
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-2 space-y-2">
+      <p className="text-xs font-semibold text-slate-700">
+        Aceites — <span className="font-normal text-slate-500">{visibles.length} de {(aceites || []).length}</span>
+      </p>
+      <p className="text-[11px] text-slate-400 -mt-1">
+        Escribe lo que te cuesta el galón (4, 5 o 6 L). La app le suma la utilidad y redondea a múltiplo de 10.
+      </p>
+      {visibles.length === 0 && <p className="text-xs text-slate-400">No hay aceites con ese nombre.</p>}
+      {visibles.map((a) => (
+        <div key={a.id} className="flex gap-1.5 items-center">
+          <input className={inputCls} value={a.nombre} onChange={(e) => patch(a.id, "nombre", e.target.value)} placeholder="Nombre" />
+          <select className={`${inputCls} w-16`} value={a.capacidad} onChange={(e) => patch(a.id, "capacidad", Number(e.target.value))}>
+            <option value={4}>4 L</option>
+            <option value={5}>5 L</option>
+            <option value={6}>6 L</option>
+          </select>
+          <input
+            className={`${inputCls} w-20`}
+            type="number"
+            value={a.costo}
+            onChange={(e) => patch(a.id, "costo", e.target.value)}
+            placeholder="Costo"
+          />
+          <span className="text-[10px] text-teal-700 font-semibold w-14 shrink-0 text-right">= {soles(precioVentaEnvase(a.costo, utilidad))}</span>
+          <button onClick={() => quitar(a.id)} className="text-slate-300 hover:text-rose-500 shrink-0">
+            <Trash2 size={15} />
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={() => update([...(aceites || []), { id: uid(), nombre: "", capacidad: 4, costo: "" }])}
+        className="text-xs text-teal-700 font-medium flex items-center gap-1"
+      >
+        <Plus size={13} /> Agregar aceite
+      </button>
+    </div>
+  );
+}
+
+// Alta y baja de vehículos del catálogo (solo administrador): permite corregir
+// los litros de un modelo o quitar los que no se usan.
+function GestorVehiculos({ vehiculos, setConfig, notify }) {
+  const [marca, setMarca] = useState("");
+  const [modelo, setModelo] = useState("");
+  const [anio, setAnio] = useState("");
+  const [litros, setLitros] = useState("");
+  const [tipo, setTipo] = useState("auto");
+  const [buscar, setBuscar] = useState("");
+
+  const agregar = () => {
+    if (!marca.trim()) return notify("Escribe la marca del vehículo");
+    const n = Number(litros);
+    if (!n) return notify("Escribe los litros del vehículo");
+    setConfig((cfg) => ({
+      ...cfg,
+      vehiculos: [
+        { id: uid(), marca: marca.trim(), modelo: modelo.trim(), anio: anio.trim(), litros: n, tipo },
+        ...(cfg.vehiculos || []),
+      ],
+    }));
+    setMarca("");
+    setModelo("");
+    setAnio("");
+    setLitros("");
+    setTipo("auto");
+  };
+
+  const quitar = (v) => setConfig((cfg) => ({ ...cfg, vehiculos: (cfg.vehiculos || []).filter((x) => x.id !== v.id) }));
+
+  const t = norm(buscar.trim());
+  const visibles = t ? (vehiculos || []).filter((v) => norm(`${v.marca} ${v.modelo} ${v.anio}`).includes(t)) : vehiculos || [];
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-2 space-y-2">
+      <p className="text-xs font-semibold text-slate-700">Agregar vehículo al catálogo</p>
+      <div className="grid grid-cols-2 gap-1.5">
+        <input className={inputCls} value={marca} onChange={(e) => setMarca(e.target.value)} placeholder="Marca" />
+        <input className={inputCls} value={modelo} onChange={(e) => setModelo(e.target.value)} placeholder="Modelo" />
+        <input className={inputCls} value={anio} onChange={(e) => setAnio(e.target.value)} placeholder="Año" />
+        <input className={inputCls} type="number" step="0.1" value={litros} onChange={(e) => setLitros(e.target.value)} placeholder="Litros" />
+      </div>
+      <select className={inputCls} value={tipo} onChange={(e) => setTipo(e.target.value)}>
+        <option value="auto">Auto</option>
+        <option value="camioneta">Camioneta</option>
+        <option value="suv">SUV</option>
+        <option value="van">Van / furgón</option>
+      </select>
+      <button onClick={agregar} className="w-full bg-slate-800 text-white rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1">
+        <Plus size={13} /> Agregar
+      </button>
+
+      <input className={inputCls} value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar en el catálogo..." />
+      <ul className="space-y-1 max-h-64 overflow-y-auto">
+        {visibles.map((v) => (
+          <li key={v.id} className="flex items-center gap-1.5 text-xs text-slate-600">
+            <span className="truncate flex-1">
+              {v.marca} {v.modelo} {v.anio} · {v.litros} L
+            </span>
+            <button onClick={() => quitar(v)} className="text-slate-300 hover:text-rose-500">
+              <Trash2 size={13} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PreciosAdmin({ configCotList, setConfigCotList, notify }) {
+  const cfg = (configCotList && configCotList[0]) || CONFIG_COT_DEFAULT;
+  const setConfig = (fn) => setConfigCotList([typeof fn === "function" ? fn(cfg) : fn]);
+  const tiposVehiculo = cfg.tiposVehiculo || TIPOS_VEHICULO;
+  const [buscaAceite, setBuscaAceite] = useState("");
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-2">
+        <h2 className="font-semibold text-slate-800 text-sm flex items-center gap-1.5">
+          <Lock size={14} className="text-slate-400" /> Solo el administrador puede cambiar estos precios
+        </h2>
+        <Field label="Utilidad (%) que se le suma al costo del galón">
+          <input className={inputCls} type="number" value={cfg.utilidad} onChange={(e) => setConfig({ ...cfg, utilidad: e.target.value })} />
+        </Field>
+        <p className="text-[11px] text-slate-400">
+          Ejemplo: galón de 165 + 10% = 181.5 → precio de venta 180 (siempre múltiplo de 10).
+        </p>
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <h2 className="font-semibold text-slate-800 text-sm">Servicios y sobreprecios por tipo de vehículo</h2>
+        <EditorPlanes planes={cfg.planes} tiposVehiculo={tiposVehiculo} setConfig={setConfig} />
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <h2 className="font-semibold text-slate-800 text-sm">Listado de precio de aceite variable</h2>
+        <p className="text-xs text-slate-400">
+          El precio de venta se calcula solo: costo + utilidad, redondeado a múltiplo de 10.
+        </p>
+        <input className={inputCls} value={buscaAceite} onChange={(e) => setBuscaAceite(e.target.value)} placeholder="Buscar aceite (ej: castrol, 10w40)..." />
+        <EditarListaAceites aceites={cfg.aceites} utilidad={cfg.utilidad} setConfig={setConfig} buscar={buscaAceite} />
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <h2 className="font-semibold text-slate-800 text-sm">Aditivos y extras</h2>
+        <EditarListaPrecios titulo="Extras" items={cfg.extras || []} campo="extras" config={cfg} setConfig={setConfig} />
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <h2 className="font-semibold text-slate-800 text-sm">Catálogo de vehículos (litros)</h2>
+        <p className="text-xs text-slate-400">Corrige los litros de un modelo o quita los que no uses.</p>
+        <GestorVehiculos vehiculos={cfg.vehiculos} setConfig={setConfig} notify={notify} />
+      </Card>
+    </div>
+  );
+}
+
+function EditorPlanes({ planes, tiposVehiculo, setConfig }) {
+  const updatePlan = (i, patch) =>
+    setConfig((cfg) => ({ ...cfg, planes: cfg.planes.map((p, j) => (j === i ? { ...p, ...patch } : p)) }));
+  const updateExtra = (i, tipoId, valor) =>
+    setConfig((cfg) => ({
+      ...cfg,
+      planes: cfg.planes.map((p, j) => (j === i ? { ...p, extra: { ...p.extra, [tipoId]: valor } } : p)),
+    }));
+
+  return (
+    <div className="space-y-2">
+      {planes.map((p, i) => (
+        <div key={p.id} className="rounded-lg border border-slate-200 p-2 space-y-2">
+          <input className={inputCls} value={p.nombre} onChange={(e) => updatePlan(i, { nombre: e.target.value })} placeholder="Nombre del servicio" />
+          <div className="grid grid-cols-2 gap-1.5">
+            {tiposVehiculo.map((t) => (
+              <label key={t.id} className="text-[11px] text-slate-500">
+                {t.nombre} (S/)
+                <input
+                  className={inputCls}
+                  type="number"
+                  value={p.extra?.[t.id] ?? ""}
+                  placeholder="Sin precio"
+                  onChange={(e) => updateExtra(i, t.id, e.target.value)}
+                />
+              </label>
+            ))}
+          </div>
+          <textarea
+            className={`${inputCls} h-20`}
+            value={p.incluye || ""}
+            onChange={(e) => updatePlan(i, { incluye: e.target.value })}
+            placeholder="Qué incluye este servicio"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CatalogoVehiculos({ vehiculos, form, setForm, esAdmin, irAPrecios }) {
+  const [q, setQ] = useState("");
+  const resultados = useMemo(() => {
+    const t = norm(q.trim());
+    if (!t) return [];
+    return (vehiculos || [])
+      .filter((v) => norm(`${v.marca} ${v.modelo} ${v.anio}`).includes(t))
+      .slice(0, 8);
+  }, [q, vehiculos]);
+
+  const usar = (v) => {
+    setForm((f) => ({
+      ...f,
+      marca: v.marca,
+      modelo: v.modelo,
+      anio: v.anio,
+      tipoVeh: v.tipo,
+      litros: String(v.litros ?? ""),
+    }));
+    setQ("");
+  };
+
+  return (
+    <div className="rounded-lg border border-teal-200 bg-teal-50 p-2 space-y-2">
+      <p className="text-xs font-semibold text-teal-900">Buscar vehículo (te llena los solos)</p>
+      <input className={inputCls} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ej: hilux, corolla, yaris..." />
+      {resultados.length > 0 && (
+        <div className="space-y-1">
+          {resultados.map((v) => (
+            <button
+              key={v.id}
+              onClick={() => usar(v)}
+              className="w-full text-left rounded-lg bg-white border border-teal-200 px-2 py-1.5 text-xs text-slate-700 flex items-center justify-between gap-2"
+            >
+              <span className="truncate">
+                {v.marca} {v.modelo} {v.anio}
+              </span>
+              <span className="shrink-0 font-semibold text-teal-700">{v.litros} L</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <p className="text-[11px] text-teal-800/70">
+        ¿Falta tu vehículo? {esAdmin ? (
+          <button onClick={irAPrecios} className="font-semibold underline">
+            Agrégalo en la pestaña Precios
+          </button>
+        ) : (
+          "Pídele al administrador que lo agregue en la pestaña Precios."
+        )}
+      </p>
+      {(vehiculos || []).length > 0 && (
+        <details className="text-[11px] text-slate-500">
+          <summary className="cursor-pointer">Ver la lista ({vehiculos.length} vehículos)</summary>
+          <ul className="mt-1 space-y-1 max-h-40 overflow-y-auto">
+            {(vehiculos || []).map((v) => (
+              <li key={v.id} className="flex items-center gap-1.5">
+                <span className="truncate flex-1">
+                  {v.marca} {v.modelo} {v.anio} · {v.litros} L
+                </span>
+                <button onClick={() => usar(v)} className="text-teal-700 font-medium">
+                  usar
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, esAdmin, irAPrecios, notify }) {
+  const cfg = (configCotList && configCotList[0]) || CONFIG_COT_DEFAULT;
+  const tiposVehiculo = cfg.tiposVehiculo || TIPOS_VEHICULO;
+
+  const formInicial = {
+    clienteId: "",
+    nombre: "",
+    telefono: "",
+    placa: "",
+    marca: "",
+    modelo: "",
+    anio: "",
+    tipoVeh: "auto",
+    litros: "",
+    planId: "basico",
+    aceiteId: "",
+    extrasIds: [],
+    descuento: "",
+    modoEnvase: cfg.modoEnvase || "completo",
+  };
+  const [form, setForm] = useState(formInicial);
+
+  const elegirCliente = (id) => {
+    const c = clientes.find((x) => x.id === id);
+    setForm((f) => ({
+      ...f,
+      clienteId: id,
+      nombre: c ? c.nombre : f.nombre,
+      telefono: c ? c.telefono || "" : f.telefono,
+      placa: c ? c.placa || "" : f.placa,
+      marca: c ? c.vehiculo || "" : f.marca,
+    }));
+  };
+
+  const toggleId = (campo, id) =>
+    setForm((f) => ({
+      ...f,
+      [campo]: f[campo].includes(id) ? f[campo].filter((x) => x !== id) : [...f[campo], id],
+    }));
+
+  const precioLitro = (a) => precioVentaEnvase(a?.costo, cfg.utilidad) / Number(a?.capacidad || 1);
+  const ventaEnvase = (a) => precioVentaEnvase(a?.costo, cfg.utilidad);
+  const plan = cfg.planes.find((p) => p.id === form.planId);
+  const aceite = cfg.aceites.find((a) => a.id === form.aceiteId);
+  const extrasSel = (cfg.extras || []).filter((x) => form.extrasIds.includes(x.id));
+  const litros = Number(form.litros || 0);
+  // Entiende cuántos galones hacen falta para cubrir los litros del vehículo.
+  const capacidad = Number(aceite?.capacidad || 0);
+  const envases = capacidad ? Math.max(1, Math.ceil(litros / capacidad)) : 0;
+  const litrosCobrados = form.modoEnvase === "proporcional" ? litros : envases * capacidad;
+  const totalAceite = ventaEnvase(aceite) * (form.modoEnvase === "proporcional" ? litros / (capacidad || 1) : envases);
+  const sobreprecio = Number(plan?.extra?.[form.tipoVeh] || 0);
+  const faltaPrecio = !!plan && sobreprecio <= 0;
+  const extrasTotal = extrasSel.reduce((s, x) => s + Number(x.precio || 0), 0);
+  const subtotal = totalAceite + sobreprecio + extrasTotal;
+  const descuento = Math.min(Number(form.descuento || 0), subtotal);
+  const total = subtotal - descuento;
+  const listo = !!plan && !!aceite && litros > 0 && !faltaPrecio;
+
+  const mensaje = (nombre) => {
+    const tipoNombre = tiposVehiculo.find((t) => t.id === form.tipoVeh)?.nombre || "";
+    const vehTxt = [form.marca, form.modelo, form.anio].filter(Boolean).join(" ");
+    return [
+      "*Cotización - MaxWash D'Durand*",
+      "",
+      `Cliente: ${nombre || "cliente"}`,
+      [[vehTxt && `Vehículo: ${vehTxt}`], [tipoNombre && `(${tipoNombre})`], [form.placa && `Placa: ${form.placa}`]]
+        .filter(Boolean)
+        .join(" "),
+      "",
+      `*${plan?.nombre || "Servicio"}*`,
+      plan?.incluye,
+      "",
+      aceite
+        ? form.modoEnvase === "proporcional"
+          ? `Aceite ${aceite.nombre}: ${litros} L x ${soles(precioLitro(aceite))} = ${soles(totalAceite)}`
+          : `Aceite ${aceite.nombre}: ${envases} galón(es) de ${capacidad} L (${litrosCobrados} L) x ${soles(ventaEnvase(aceite))} = ${soles(totalAceite)}`
+        : "",
+      plan ? `${plan.nombre}: ${soles(sobreprecio)}` : "",
+      ...extrasSel.map((x) => `${x.nombre}: ${soles(x.precio)}`),
+      descuento > 0 ? `Descuento: -${soles(descuento)}` : "",
+      "",
+      `*TOTAL: ${soles(total)}*`,
+      "",
+      "Elevamos tu vehículo con máquina elevadora rotary para el cambio de aceite.",
+      "¿Confirmas este servicio? Te esperamos en MaxWash D'Durand.",
+    ]
+      .filter((l) => l !== "")
+      .join("\n");
+  };
+
+  const guardar = async (abrirWhatsApp) => {
+    if (!plan) return notify("Elige el tipo de servicio");
+    if (!aceite) return notify("Elige el aceite");
+    if (!litros) return notify("Escribe o busca los litros del vehículo");
+    if (faltaPrecio) return notify(`Falta el sobreprecio de ${tiposVehiculo.find((t) => t.id === form.tipoVeh)?.nombre}. Pídele al administrador que lo ponga en la pestaña Precios.`);
+    const nombre = form.nombre.trim();
+    const wa = telParaWhatsApp(form.telefono);
+    const texto = mensaje(nombre);
+    if (abrirWhatsApp && wa) {
+      window.open("https://wa.me/" + wa + "?text=" + encodeURIComponent(texto), "_blank", "noopener");
+    }
+    await setCotizaciones([
+      {
+        id: uid(),
+        fecha: new Date().toISOString(),
+        clienteId: form.clienteId || null,
+        nombre: nombre || "Cliente sin nombre",
+        telefono: form.telefono,
+        placa: form.placa,
+        vehiculo: [form.marca, form.modelo, form.anio].filter(Boolean).join(" "),
+        tipoVeh: form.tipoVeh,
+        litros,
+        plan: plan.nombre,
+        aceite: aceite.nombre,
+        precioLitro: precioLitro(aceite),
+        sobreprecio,
+        extras: extrasSel.map((x) => ({ nombre: x.nombre, precio: Number(x.precio || 0) })),
+        descuento,
+        total,
+        mensaje: texto,
+        enviada: !!(abrirWhatsApp && wa),
+      },
+      ...(cotizaciones || []),
+    ]);
+    setForm({ ...formInicial });
+    notify(abrirWhatsApp ? (wa ? "Cotización enviada y guardada" : "Guardada (el cliente no tiene teléfono)") : "Cotización guardada");
+  };
+
+  const reenviar = (q) => {
+    const wa = telParaWhatsApp(q.telefono);
+    if (!wa) return notify("Esta cotización no tiene teléfono");
+    window.open("https://wa.me/" + wa + "?text=" + encodeURIComponent(q.mensaje || ""), "_blank", "noopener");
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="font-semibold text-slate-800 text-sm flex items-center gap-1.5">
+              <Tag size={14} className="text-slate-400" /> Precios en uso
+            </h2>
+            <p className="text-xs text-slate-500">
+              Utilidad {cfg.utilidad}% · {cfg.planes.length} servicios · {cfg.aceites.length} aceites
+            </p>
+          </div>
+          {esAdmin && (
+            <button onClick={irAPrecios} className="shrink-0 text-xs text-teal-700 font-medium flex items-center gap-1">
+              <Settings size={13} /> Editar precios
+            </button>
+          )}
+        </div>
+        {!esAdmin && (
+          <p className="text-[11px] text-slate-400 flex items-center gap-1">
+            <Lock size={12} /> Solo el administrador puede modificar los precios.
+          </p>
+        )}
+      </Card>
+
+      <Card className="p-4 space-y-3">
+        <h2 className="font-semibold text-slate-800 text-sm">Nueva cotización</h2>
+
+        {clientes.length > 0 && (
+          <Field label="Buscar cliente registrado">
+            <select className={inputCls} value={form.clienteId} onChange={(e) => elegirCliente(e.target.value)}>
+              <option value="">— Cliente nuevo (escribir a mano) —</option>
+              {clientes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre}
+                  {c.telefono ? ` · ${c.telefono}` : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Nombre">
+            <input className={inputCls} value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
+          </Field>
+          <Field label="Teléfono (WhatsApp)">
+            <input className={inputCls} value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} placeholder="9 dígitos" />
+          </Field>
+        </div>
+
+        <CatalogoVehiculos vehiculos={cfg.vehiculos} form={form} setForm={setForm} esAdmin={esAdmin} irAPrecios={irAPrecios} />
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Marca">
+            <input className={inputCls} value={form.marca} onChange={(e) => setForm({ ...form, marca: e.target.value })} placeholder="Toyota" />
+          </Field>
+          <Field label="Modelo">
+            <input className={inputCls} value={form.modelo} onChange={(e) => setForm({ ...form, modelo: e.target.value })} placeholder="Hilux 2.8" />
+          </Field>
+          <Field label="Año">
+            <input className={inputCls} value={form.anio} onChange={(e) => setForm({ ...form, anio: e.target.value })} placeholder="2019" />
+          </Field>
+          <Field label="Placa">
+            <input className={inputCls} value={form.placa} onChange={(e) => setForm({ ...form, placa: e.target.value.toUpperCase() })} placeholder="ABC-123" />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Tipo de vehículo">
+            <select className={inputCls} value={form.tipoVeh} onChange={(e) => setForm({ ...form, tipoVeh: e.target.value })}>
+              {tiposVehiculo.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.nombre}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Litros de aceite">
+            <input className={inputCls} type="number" step="0.1" value={form.litros} onChange={(e) => setForm({ ...form, litros: e.target.value })} placeholder="8" />
+          </Field>
+        </div>
+
+        <div>
+          <p className="text-xs font-medium text-slate-600 mb-1">Servicio</p>
+          <div className="space-y-1.5">
+            {cfg.planes.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setForm({ ...form, planId: p.id })}
+                className={`w-full text-left rounded-lg border px-2.5 py-2 ${
+                  form.planId === p.id ? "border-teal-600 bg-teal-50" : "border-slate-200"
+                }`}
+              >
+                <p className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                  {form.planId === p.id && <Check size={13} className="text-teal-700" />}
+                  {p.nombre}
+                  <span className="font-normal text-slate-500">
+                    (aceite + {soles(Number(p.extra?.[form.tipoVeh] || 0))})
+                  </span>
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">{p.incluye}</p>
+              </button>
+            ))}
+          </div>
+          {faltaPrecio && (
+            <p className="text-[11px] text-rose-600 mt-1">
+              No hay sobreprecio para {tiposVehiculo.find((t) => t.id === form.tipoVeh)?.nombre}. Solo el administrador lo configura en la pestaña Precios.
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Aceite (galón)">
+            <select className={inputCls} value={form.aceiteId} onChange={(e) => setForm({ ...form, aceiteId: e.target.value })}>
+              <option value="">— Elegir —</option>
+              {gruposAceites(cfg.aceites).map((g) => (
+                <optgroup key={g.grupo} label={g.grupo}>
+                  {g.aceites.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.nombre} · {soles(ventaEnvase(a))}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </Field>
+          <Field label="Descuento (S/)">
+            <input className={inputCls} type="number" value={form.descuento} onChange={(e) => setForm({ ...form, descuento: e.target.value })} placeholder="0" />
+          </Field>
+        </div>
+
+        {aceite && (
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setForm({ ...form, modoEnvase: "completo" })}
+              className={`rounded-lg border px-2 py-2 text-[11px] font-medium ${
+                form.modoEnvase === "completo" ? "border-teal-600 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-500"
+              }`}
+            >
+              Cobrar {envases} galón(es) completo(s)
+            </button>
+            <button
+              onClick={() => setForm({ ...form, modoEnvase: "proporcional" })}
+              className={`rounded-lg border px-2 py-2 text-[11px] font-medium ${
+                form.modoEnvase === "proporcional" ? "border-teal-600 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-500"
+              }`}
+            >
+              Cobrar solo {litros} L
+            </button>
+          </div>
+        )}
+
+        {(cfg.extras || []).length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-slate-600 mb-1">Aditivos y extras (opcional)</p>
+            <div className="flex flex-wrap gap-1.5">
+              {cfg.extras.map((x) => (
+                <button
+                  key={x.id}
+                  onClick={() => toggleId("extrasIds", x.id)}
+                  className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium ${
+                    form.extrasIds.includes(x.id) ? "border-teal-600 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-500"
+                  }`}
+                >
+                  {x.nombre} · {soles(x.precio)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {listo && (
+          <div className="rounded-lg p-3 bg-slate-50 border border-slate-200 space-y-1">
+            {aceite && (
+              <div className="flex justify-between text-xs text-slate-500">
+                <span>
+                  Aceite {aceite.nombre}{" "}
+                  {form.modoEnvase === "proporcional"
+                    ? `${litros} L × ${soles(precioLitro(aceite))}`
+                    : `${envases} galón(es) de ${capacidad} L × ${soles(ventaEnvase(aceite))}`}
+                </span>
+                <span>{soles(totalAceite)}</span>
+              </div>
+            )}
+            {plan && (
+              <div className="flex justify-between text-xs text-slate-500">
+                <span>{plan.nombre}</span>
+                <span>{soles(sobreprecio)}</span>
+              </div>
+            )}
+            {extrasSel.map((x) => (
+              <div key={x.id} className="flex justify-between text-xs text-slate-500">
+                <span>{x.nombre}</span>
+                <span>{soles(x.precio)}</span>
+              </div>
+            ))}
+            {descuento > 0 && (
+              <div className="flex justify-between text-xs text-rose-600">
+                <span>Descuento</span>
+                <span>-{soles(descuento)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-bold text-sm pt-1 mt-1 border-t border-slate-200 text-teal-700">
+              <span>Total</span>
+              <span>{soles(total)}</span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => guardar(true)}
+            className="flex-1 bg-teal-600 text-white rounded-lg py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5"
+          >
+            <MessageCircle size={16} /> Enviar por WhatsApp
+          </button>
+          <button onClick={() => guardar(false)} className="shrink-0 px-3 py-2.5 text-sm font-semibold rounded-lg border border-slate-200 text-slate-600">
+            Solo guardar
+          </button>
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <h2 className="font-semibold text-slate-800 mb-2 text-sm">Cotizaciones guardadas ({(cotizaciones || []).length})</h2>
+        {(cotizaciones || []).length === 0 ? (
+          <EmptyState text="Todavía no hay cotizaciones." />
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {cotizaciones.slice(0, 25).map((q) => (
+              <li key={q.id} className="py-3 flex items-center gap-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-slate-800 truncate">
+                    {q.nombre} {q.enviada ? "" : "(sin enviar)"}
+                  </p>
+                  <p className="text-xs text-slate-400 truncate">
+                    {fechaLocal(q.fecha)} {fmtHora(q.fecha)} · {[q.plan, q.vehiculo].filter(Boolean).join(" · ") || "—"}
+                  </p>
+                </div>
+                <span className="font-semibold text-teal-700 text-sm shrink-0">{soles(q.total)}</span>
+                <button onClick={() => reenviar(q)} className="text-[#25D366] hover:text-[#1da851] shrink-0" title="Reenviar por WhatsApp">
+                  <MessageCircle size={17} />
+                </button>
+                <button onClick={() => setCotizaciones(cotizaciones.filter((x) => x.id !== q.id))} className="text-slate-300 hover:text-rose-500 shrink-0">
+                  <Trash2 size={15} />
+                </button>
+              </li>
+            ))}
           </ul>
         )}
       </Card>
