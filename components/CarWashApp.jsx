@@ -213,7 +213,7 @@ const CONFIG_COT_DEFAULT = {
     { id: "o48", nombre: "15W40 Mobil 4L", capacidad: 4, costo: 115 },
     { id: "o49", nombre: "15W40 Castrol 4L", capacidad: 4, costo: 105 },
   ],
-  extras: [{ id: "x1", nombre: "Aditivo / revitalizador", precio: 20 }],
+  extras: [{ id: "x1", nombre: "Engine Flush Liqui Moly", precio: 50 }],
   vehiculos: VEHICULOS_INICIALES,
 };
 
@@ -2875,9 +2875,20 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
   const total = subtotal - descuento;
   const listo = !!plan && !!aceite && litros > 0 && !faltaPrecio;
 
+  // El mensaje al cliente lista todo lo que incluye el servicio y el aceite
+  // elegidos, pero sin precios sueltos: solo el total al final.
   const mensaje = (nombre) => {
     const tipoNombre = tiposVehiculo.find((t) => t.id === form.tipoVeh)?.nombre || "";
     const vehTxt = [form.marca, form.modelo, form.anio].filter(Boolean).join(" ");
+    const incluye = String(plan?.incluye || "")
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const aceiteLinea = !aceite
+      ? ""
+      : form.modoEnvase === "proporcional"
+        ? `Aceite ${aceite.nombre} (${litros} L)`
+        : `Aceite ${aceite.nombre} (${envases} galón${Number(envases) === 1 ? "" : "es"} de ${capacidad} L)`;
     return [
       "*Cotización - MaxWash D'Durand*",
       "",
@@ -2887,16 +2898,9 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
         .join(" "),
       "",
       `*${plan?.nombre || "Servicio"}*`,
-      plan?.incluye,
-      "",
-      aceite
-        ? form.modoEnvase === "proporcional"
-          ? `Aceite ${aceite.nombre}: ${litros} L x ${soles(precioLitro(aceite))} = ${soles(totalAceite)}`
-          : `Aceite ${aceite.nombre}: ${envases} galón(es) de ${capacidad} L (${litrosCobrados} L) x ${soles(ventaEnvase(aceite))} = ${soles(totalAceite)}`
-        : "",
-      plan ? `${plan.nombre}: ${soles(sobreprecio)}` : "",
-      ...extrasSel.map((x) => `${x.nombre}: ${soles(x.precio)}`),
-      descuento > 0 ? `Descuento: -${soles(descuento)}` : "",
+      ...incluye.map((x) => `• ${x}`),
+      aceiteLinea && `• ${aceiteLinea}`,
+      ...extrasSel.map((x) => `• ${x.nombre}`),
       "",
       `*TOTAL: ${soles(total)}*`,
       "",
