@@ -141,13 +141,13 @@ const VEHICULOS_INICIALES = [
 // el dueño los edita desde la app, en la pestaña "Precios" (solo administrador)
 // y quedan guardados en la nube.
 const CONFIG_COT_DEFAULT = {
-  versionCot: 4,
+  versionCot: 5,
   utilidad: 10,
   // "completo": se cobra el número de envases completos que cubren los litros.
   // "proporcional": se cobra solo por los litros que realmente lleva el carro.
   modoEnvase: "completo",
   corteLitros: 5,
-  recargoExtra: 20,
+  recargoExtra: 10,
   tiposVehiculo: TIPOS_VEHICULO,
   planes: [
     {
@@ -2695,15 +2695,18 @@ function GestorVehiculos({ vehiculos, setConfig, notify }) {
 
 function configCotCompleta(cfg) {
   const c = cfg || {};
+  const versionNueva = CONFIG_COT_DEFAULT.versionCot;
+  const esConfigVieja = Number(c.versionCot || 0) < versionNueva;
   return {
     ...CONFIG_COT_DEFAULT,
     ...c,
+    versionCot: versionNueva,
     planes:
-      Array.isArray(c.planes) && Number(c.versionCot) >= CONFIG_COT_DEFAULT.versionCot
+      Array.isArray(c.planes) && !esConfigVieja && c.planes.length >= CONFIG_COT_DEFAULT.planes.length
         ? c.planes
         : CONFIG_COT_DEFAULT.planes,
     corteLitros: Number(c.corteLitros ?? CONFIG_COT_DEFAULT.corteLitros),
-    recargoExtra: Number(c.recargoExtra ?? CONFIG_COT_DEFAULT.recargoExtra),
+    recargoExtra: esConfigVieja ? CONFIG_COT_DEFAULT.recargoExtra : Number(c.recargoExtra ?? CONFIG_COT_DEFAULT.recargoExtra),
     tiposVehiculo: c.tiposVehiculo || CONFIG_COT_DEFAULT.tiposVehiculo,
     vehiculos: (c.vehiculos || []).length ? c.vehiculos : CONFIG_COT_DEFAULT.vehiculos,
     aceites: (c.aceites || []).length ? c.aceites : CONFIG_COT_DEFAULT.aceites,
@@ -2738,7 +2741,7 @@ function PreciosAdmin({ configCotList, setConfigCotList, notify }) {
         </p>
         <p className="text-[11px] text-slate-400">
           El sobrante que no completa un galón se cobra por litro redondeado hacia arriba. Si el carro pasa de {cfg.corteLitros} L,
-          ese litro lleva {cfg.recargoExtra}% extra. Ej: galón de 160 en 4 L, carro de 6.5 L → 160 + 3 L × 48 = S/304.
+          ese litro lleva {cfg.recargoExtra}% extra. Ej: galón de 160 en 4 L, carro de 6.5 L → 160 + 3 L × 44 = S/292.
         </p>
       </Card>
 
