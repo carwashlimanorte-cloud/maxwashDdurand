@@ -141,25 +141,39 @@ const VEHICULOS_INICIALES = [
 // el dueño los edita desde la app, en la pestaña "Precios" (solo administrador)
 // y quedan guardados en la nube.
 const CONFIG_COT_DEFAULT = {
+  versionCot: 4,
   utilidad: 10,
   // "completo": se cobra el número de envases completos que cubren los litros.
   // "proporcional": se cobra solo por los litros que realmente lleva el carro.
   modoEnvase: "completo",
+  corteLitros: 5,
+  recargoExtra: 20,
   tiposVehiculo: TIPOS_VEHICULO,
   planes: [
     {
       id: "basico",
-      nombre: "Cambio de aceite básico",
+      nombre: "Mantenimiento básico",
       extra: { auto: 90, camioneta: 100, suv: 120, van: 130 },
       incluye:
-        "Cambio de aceite, cambio de filtro de aceite, pulverizado de motor, lavado, mano de obra, limpieza de filtro de motor y limpieza de filtro de aire acondicionado.",
+        "Aceite (elección de marca por el cliente), filtro de aceite, revisión de niveles, revisión de presión de neumáticos.",
+      opciones: [
+        { id: "op1", nombre: "Lavado básico" },
+        { id: "op2", nombre: "Pulverizado de motor" },
+      ],
     },
     {
-      id: "express",
-      nombre: "Mantenimiento express",
+      id: "plus",
+      nombre: "Mantenimiento plus",
       extra: { auto: 160, camioneta: 190, suv: 200, van: 210 },
       incluye:
-        "Todo el básico + cambio de filtro de motor, cambio de filtro de aire acondicionado, lavado de chasis, revisión de frenos y suspensión, revisión del líquido de freno, relleno de limpiaparabrisas y lavado de guardafangos.",
+        "Aceite (elección de marca por el cliente), filtro de aceite, filtro de aire, revisión de líquidos, revisión de frenos, revisión de suspensión, pulverizado de motor, lavado express, vehículo elevado en máquina Rotary.",
+    },
+    {
+      id: "premium",
+      nombre: "Mantenimiento premium",
+      extra: { auto: 200, camioneta: 240, suv: 260, van: 260 },
+      incluye:
+        "Aceite (elección de marca por el cliente), filtro de aceite, filtro de aire, filtro de cabina, rellenado de líquido de parabrisas, lavado de motor completo, aspirado interior, revisión de frenos y suspensión, diagnóstico visual de fugas, lavado premium, lavado de chasis, vehículo elevado en máquina Rotary.",
     },
   ],
   aceites: [
@@ -222,6 +236,29 @@ const CONFIG_COT_DEFAULT = {
 function precioVentaEnvase(costo, utilidad) {
   const conUtilidad = Number(costo || 0) * (1 + Number(utilidad || 0) / 100);
   return Math.round(conUtilidad / 10) * 10;
+}
+
+// Cobro del aceite: se venden galones completos (mínimo 1) y el sobrante que no
+// completa un galón se cobra por litro redondeado hacia arriba. Si el carro pasa
+// del corte de litros, ese litro sobrante lleva el recargo adicional.
+function calculoAceite(aceite, litros, config) {
+  const capacidad = Number(aceite?.capacidad || 0);
+  const ventaGalon = precioVentaEnvase(aceite?.costo, config.utilidad);
+  if (!capacidad) return { galones: 0, sobrante: 0, ventaGalon, precioLitro: 0, precioSobrante: 0, total: 0 };
+  const galones = Math.max(1, Math.floor(litros / capacidad));
+  const sobrante = Math.max(0, Math.ceil(litros - galones * capacidad));
+  const precioLitro = ventaGalon / capacidad;
+  const recargo = litros > Number(config.corteLitros || 0) ? Number(config.recargoExtra || 0) : 0;
+  const precioSobrante = precioLitro * (1 + recargo / 100);
+  return {
+    galones,
+    sobrante,
+    ventaGalon,
+    precioLitro,
+    precioSobrante,
+    recargo,
+    total: ventaGalon * galones + precioSobrante * sobrante,
+  };
 }
 
 // Agrupa los aceites por la viscosidad con la que empiezan (10W30, 20W50...),
@@ -2656,8 +2693,25 @@ function GestorVehiculos({ vehiculos, setConfig, notify }) {
   );
 }
 
+function configCotCompleta(cfg) {
+  const c = cfg || {};
+  return {
+    ...CONFIG_COT_DEFAULT,
+    ...c,
+    planes:
+      Array.isArray(c.planes) && Number(c.versionCot) >= CONFIG_COT_DEFAULT.versionCot
+        ? c.planes
+        : CONFIG_COT_DEFAULT.planes,
+    corteLitros: Number(c.corteLitros ?? CONFIG_COT_DEFAULT.corteLitros),
+    recargoExtra: Number(c.recargoExtra ?? CONFIG_COT_DEFAULT.recargoExtra),
+    tiposVehiculo: c.tiposVehiculo || CONFIG_COT_DEFAULT.tiposVehiculo,
+    vehiculos: (c.vehiculos || []).length ? c.vehiculos : CONFIG_COT_DEFAULT.vehiculos,
+    aceites: (c.aceites || []).length ? c.aceites : CONFIG_COT_DEFAULT.aceites,
+  };
+}
+
 function PreciosAdmin({ configCotList, setConfigCotList, notify }) {
-  const cfg = (configCotList && configCotList[0]) || CONFIG_COT_DEFAULT;
+  const cfg = configCotCompleta((configCotList && configCotList[0]) || CONFIG_COT_DEFAULT);
   const setConfig = (fn) => setConfigCotList([typeof fn === "function" ? fn(cfg) : fn]);
   const tiposVehiculo = cfg.tiposVehiculo || TIPOS_VEHICULO;
   const [buscaAceite, setBuscaAceite] = useState("");
@@ -2668,11 +2722,23 @@ function PreciosAdmin({ configCotList, setConfigCotList, notify }) {
         <h2 className="font-semibold text-slate-800 text-sm flex items-center gap-1.5">
           <Lock size={14} className="text-slate-400" /> Solo el administrador puede cambiar estos precios
         </h2>
-        <Field label="Utilidad (%) que se le suma al costo del galón">
-          <input className={inputCls} type="number" value={cfg.utilidad} onChange={(e) => setConfig({ ...cfg, utilidad: e.target.value })} />
-        </Field>
+        <div className="grid grid-cols-3 gap-2">
+          <Field label="Utilidad (%) sobre el galón">
+            <input className={inputCls} type="number" value={cfg.utilidad} onChange={(e) => setConfig({ ...cfg, utilidad: e.target.value })} />
+          </Field>
+          <Field label="Corte de litros">
+            <input className={inputCls} type="number" step="0.5" value={cfg.corteLitros} onChange={(e) => setConfig({ ...cfg, corteLitros: e.target.value })} />
+          </Field>
+          <Field label="Recargo del sobrante (%)">
+            <input className={inputCls} type="number" value={cfg.recargoExtra} onChange={(e) => setConfig({ ...cfg, recargoExtra: e.target.value })} />
+          </Field>
+        </div>
         <p className="text-[11px] text-slate-400">
           Ejemplo: galón de 165 + 10% = 181.5 → precio de venta 180 (siempre múltiplo de 10).
+        </p>
+        <p className="text-[11px] text-slate-400">
+          El sobrante que no completa un galón se cobra por litro redondeado hacia arriba. Si el carro pasa de {cfg.corteLitros} L,
+          ese litro lleva {cfg.recargoExtra}% extra. Ej: galón de 160 en 4 L, carro de 6.5 L → 160 + 3 L × 48 = S/304.
         </p>
       </Card>
 
@@ -2712,6 +2778,25 @@ function EditorPlanes({ planes, tiposVehiculo, setConfig }) {
       ...cfg,
       planes: cfg.planes.map((p, j) => (j === i ? { ...p, extra: { ...p.extra, [tipoId]: valor } } : p)),
     }));
+  const updateOpcion = (i, opId, nombre) =>
+    setConfig((cfg) => ({
+      ...cfg,
+      planes: cfg.planes.map((p, j) => (j === i ? { ...p, opciones: (p.opciones || []).map((o) => (o.id === opId ? { ...o, nombre } : o)) } : p)),
+    }));
+  const agregarOpcion = (i) =>
+    setConfig((cfg) => ({
+      ...cfg,
+      planes: cfg.planes.map((p, j) =>
+        j === i ? { ...p, opciones: [...(p.opciones || []), { id: uid(), nombre: "" }] } : p
+      ),
+    }));
+  const quitarOpcion = (i, opId) =>
+    setConfig((cfg) => ({
+      ...cfg,
+      planes: cfg.planes.map((p, j) =>
+        j === i ? { ...p, opciones: (p.opciones || []).filter((o) => o.id !== opId) } : p
+      ),
+    }));
 
   return (
     <div className="space-y-2">
@@ -2738,6 +2823,20 @@ function EditorPlanes({ planes, tiposVehiculo, setConfig }) {
             onChange={(e) => updatePlan(i, { incluye: e.target.value })}
             placeholder="Qué incluye este servicio"
           />
+          <div className="rounded-lg border border-slate-100 bg-slate-50 p-2 space-y-1.5">
+            <p className="text-[11px] font-semibold text-slate-600">Opciones: el cliente elige una (vacío = sin opciones)</p>
+            {(p.opciones || []).map((o) => (
+              <div key={o.id} className="flex gap-1.5 items-center">
+                <input className={inputCls} value={o.nombre} onChange={(e) => updateOpcion(i, o.id, e.target.value)} placeholder="Ej: Lavado básico" />
+                <button onClick={() => quitarOpcion(i, o.id)} className="text-slate-300 hover:text-rose-500 shrink-0">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            <button onClick={() => agregarOpcion(i)} className="text-xs text-teal-700 font-medium flex items-center gap-1">
+              <Plus size={13} /> Agregar opción
+            </button>
+          </div>
         </div>
       ))}
     </div>
@@ -2817,7 +2916,7 @@ function CatalogoVehiculos({ vehiculos, form, setForm, esAdmin, irAPrecios }) {
 }
 
 function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, esAdmin, irAPrecios, notify }) {
-  const cfg = (configCotList && configCotList[0]) || CONFIG_COT_DEFAULT;
+  const cfg = configCotCompleta((configCotList && configCotList[0]) || CONFIG_COT_DEFAULT);
   const tiposVehiculo = cfg.tiposVehiculo || TIPOS_VEHICULO;
 
   const formInicial = {
@@ -2831,6 +2930,7 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
     tipoVeh: "auto",
     litros: "",
     planId: "basico",
+    opcionPlan: "",
     aceiteId: "",
     extrasIds: [],
     descuento: "",
@@ -2859,21 +2959,24 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
   const precioLitro = (a) => precioVentaEnvase(a?.costo, cfg.utilidad) / Number(a?.capacidad || 1);
   const ventaEnvase = (a) => precioVentaEnvase(a?.costo, cfg.utilidad);
   const plan = cfg.planes.find((p) => p.id === form.planId);
+  const opciones = plan?.opciones || [];
+  const opcionElegida = opciones.find((o) => o.id === form.opcionPlan) || opciones[0] || null;
   const aceite = cfg.aceites.find((a) => a.id === form.aceiteId);
   const extrasSel = (cfg.extras || []).filter((x) => form.extrasIds.includes(x.id));
   const litros = Number(form.litros || 0);
-  // Entiende cuántos galones hacen falta para cubrir los litros del vehículo.
   const capacidad = Number(aceite?.capacidad || 0);
-  const envases = capacidad ? Math.max(1, Math.ceil(litros / capacidad)) : 0;
-  const litrosCobrados = form.modoEnvase === "proporcional" ? litros : envases * capacidad;
-  const totalAceite = ventaEnvase(aceite) * (form.modoEnvase === "proporcional" ? litros / (capacidad || 1) : envases);
+  const calculo = calculoAceite(aceite, litros, cfg);
+  const galones = calculo.galones;
+  const sobra = calculo.sobrante;
+  const totalAceite = calculo.total;
   const sobreprecio = Number(plan?.extra?.[form.tipoVeh] || 0);
   const faltaPrecio = !!plan && sobreprecio <= 0;
   const extrasTotal = extrasSel.reduce((s, x) => s + Number(x.precio || 0), 0);
   const subtotal = totalAceite + sobreprecio + extrasTotal;
   const descuento = Math.min(Number(form.descuento || 0), subtotal);
   const total = subtotal - descuento;
-  const listo = !!plan && !!aceite && litros > 0 && !faltaPrecio;
+  const listo = !!plan && !!aceite && litros > 0 && capacidad > 0 && !faltaPrecio;
+  const sinOpcion = opciones.length > 0 && !opcionElegida;
 
   // El mensaje al cliente lista todo lo que incluye el servicio y el aceite
   // elegidos, pero sin precios sueltos: solo el total al final.
@@ -2886,9 +2989,9 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
       .filter(Boolean);
     const aceiteLinea = !aceite
       ? ""
-      : form.modoEnvase === "proporcional"
-        ? `Aceite ${aceite.nombre} (${litros} L)`
-        : `Aceite ${aceite.nombre} (${envases} galón${Number(envases) === 1 ? "" : "es"} de ${capacidad} L)`;
+      : `Aceite ${aceite.nombre} (${galones} galón${galones === 1 ? "" : "es"} de ${capacidad} L${
+          sobra > 0 ? ` + ${sobra} L` : ""
+        })`;
     return [
       "*Cotización - MaxWash D'Durand*",
       "",
@@ -2899,12 +3002,12 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
       "",
       `*${plan?.nombre || "Servicio"}*`,
       ...incluye.map((x) => `• ${x}`),
+      ...(opcionElegida ? [`• ${opcionElegida.nombre}`] : []),
       aceiteLinea && `• ${aceiteLinea}`,
       ...extrasSel.map((x) => `• ${x.nombre}`),
       "",
       `*TOTAL: ${soles(total)}*`,
       "",
-      "Elevamos tu vehículo con máquina elevadora rotary para el cambio de aceite.",
       "¿Confirmas este servicio? Te esperamos en MaxWash D'Durand.",
     ]
       .filter((l) => l !== "")
@@ -2915,7 +3018,9 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
     if (!plan) return notify("Elige el tipo de servicio");
     if (!aceite) return notify("Elige el aceite");
     if (!litros) return notify("Escribe o busca los litros del vehículo");
+    if (!capacidad) return notify("Este aceite no tiene capacidad definida. El administrador debe corregirlo en la pestaña Precios.");
     if (faltaPrecio) return notify(`Falta el sobreprecio de ${tiposVehiculo.find((t) => t.id === form.tipoVeh)?.nombre}. Pídele al administrador que lo ponga en la pestaña Precios.`);
+    if (sinOpcion) return notify("Elige una de las opciones del servicio");
     const nombre = form.nombre.trim();
     const wa = telParaWhatsApp(form.telefono);
     const texto = mensaje(nombre);
@@ -2934,8 +3039,11 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
         tipoVeh: form.tipoVeh,
         litros,
         plan: plan.nombre,
+        opcion: opcionElegida ? opcionElegida.nombre : "",
         aceite: aceite.nombre,
-        precioLitro: precioLitro(aceite),
+        precioLitro: calculo.precioLitro,
+        galones,
+        litrosExtra: sobra,
         sobreprecio,
         extras: extrasSel.map((x) => ({ nombre: x.nombre, precio: Number(x.precio || 0) })),
         descuento,
@@ -3065,6 +3173,23 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
               No hay sobreprecio para {tiposVehiculo.find((t) => t.id === form.tipoVeh)?.nombre}. Solo el administrador lo configura en la pestaña Precios.
             </p>
           )}
+          {opciones.length > 0 && (
+            <div className="mt-2 rounded-lg border border-slate-200 p-2 space-y-1">
+              <p className="text-xs font-medium text-slate-600">El cliente elige una:</p>
+              {opciones.map((o) => (
+                <button
+                  key={o.id}
+                  onClick={() => setForm({ ...form, opcionPlan: o.id })}
+                  className={`w-full text-left rounded-lg border px-2 py-1.5 text-xs flex items-center gap-1.5 ${
+                    opcionElegida?.id === o.id ? "border-teal-600 bg-teal-50 text-teal-900" : "border-slate-200 text-slate-600"
+                  }`}
+                >
+                  {opcionElegida?.id === o.id && <Check size={13} className="text-teal-700 shrink-0" />}
+                  {o.nombre}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -3088,23 +3213,18 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
         </div>
 
         {aceite && (
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => setForm({ ...form, modoEnvase: "completo" })}
-              className={`rounded-lg border px-2 py-2 text-[11px] font-medium ${
-                form.modoEnvase === "completo" ? "border-teal-600 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-500"
-              }`}
-            >
-              Cobrar {envases} galón(es) completo(s)
-            </button>
-            <button
-              onClick={() => setForm({ ...form, modoEnvase: "proporcional" })}
-              className={`rounded-lg border px-2 py-2 text-[11px] font-medium ${
-                form.modoEnvase === "proporcional" ? "border-teal-600 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-500"
-              }`}
-            >
-              Cobrar solo {litros} L
-            </button>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 space-y-0.5">
+            <p className="text-[11px] font-semibold text-slate-600">Cómo se cobra el aceite</p>
+            <p className="text-[11px] text-slate-500">
+              {galones} galón{galones === 1 ? "" : "es"} de {capacidad} L × {soles(calculo.ventaGalon)}
+              {sobra > 0 ? ` · ${sobra} L sobrante × ${soles(calculo.precioSobrante)}` : ""}
+            </p>
+            <p className="text-[10px] text-slate-400">
+              Litro normal {soles(calculo.precioLitro)}
+              {litros > Number(cfg.corteLitros || 0)
+                ? ` · sobrante con +${cfg.recargoExtra}% porque el carro pasa de ${cfg.corteLitros} L`
+                : ` · sin recargo (el carro no pasa de ${cfg.corteLitros} L)`}
+            </p>
           </div>
         )}
 
@@ -3132,10 +3252,8 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
             {aceite && (
               <div className="flex justify-between text-xs text-slate-500">
                 <span>
-                  Aceite {aceite.nombre}{" "}
-                  {form.modoEnvase === "proporcional"
-                    ? `${litros} L × ${soles(precioLitro(aceite))}`
-                    : `${envases} galón(es) de ${capacidad} L × ${soles(ventaEnvase(aceite))}`}
+                  Aceite {aceite.nombre} · {galones} galón{galones === 1 ? "" : "es"} de {capacidad} L
+                  {sobra > 0 ? ` + ${sobra} L extra` : ""}
                 </span>
                 <span>{soles(totalAceite)}</span>
               </div>
@@ -3191,7 +3309,7 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
                     {q.nombre} {q.enviada ? "" : "(sin enviar)"}
                   </p>
                   <p className="text-xs text-slate-400 truncate">
-                    {fechaLocal(q.fecha)} {fmtHora(q.fecha)} · {[q.plan, q.vehiculo].filter(Boolean).join(" · ") || "—"}
+                    {fechaLocal(q.fecha)} {fmtHora(q.fecha)} · {[q.plan, q.opcion, q.vehiculo].filter(Boolean).join(" · ") || "—"}
                   </p>
                 </div>
                 <span className="font-semibold text-teal-700 text-sm shrink-0">{soles(q.total)}</span>
