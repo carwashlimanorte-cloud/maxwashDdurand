@@ -39,6 +39,7 @@ function norm(s) {
 const TIPOS_VEHICULO = [
   { id: "auto", nombre: "Auto" },
   { id: "camioneta", nombre: "Camioneta" },
+  { id: "camionetaxl", nombre: "Camioneta XL" },
   { id: "suv", nombre: "SUV" },
   { id: "van", nombre: "Van / furgón" },
 ];
@@ -141,7 +142,7 @@ const VEHICULOS_INICIALES = [
 // el dueño los edita desde la app, en la pestaña "Precios" (solo administrador)
 // y quedan guardados en la nube.
 const CONFIG_COT_DEFAULT = {
-  versionCot: 5,
+  versionCot: 7,
   utilidad: 10,
   // "completo": se cobra el número de envases completos que cubren los litros.
   // "proporcional": se cobra solo por los litros que realmente lleva el carro.
@@ -153,7 +154,7 @@ const CONFIG_COT_DEFAULT = {
     {
       id: "basico",
       nombre: "Mantenimiento básico",
-      extra: { auto: 90, camioneta: 100, suv: 120, van: 130 },
+      extra: { auto: 90, camioneta: 100, camionetaxl: 120, suv: 120, van: 130 },
       incluye:
         "Aceite (elección de marca por el cliente), filtro de aceite, revisión de niveles, revisión de presión de neumáticos.",
       opciones: [
@@ -164,16 +165,47 @@ const CONFIG_COT_DEFAULT = {
     {
       id: "plus",
       nombre: "Mantenimiento plus",
-      extra: { auto: 160, camioneta: 190, suv: 200, van: 210 },
+      extra: { auto: 160, camioneta: 190, camionetaxl: 200, suv: 200, van: 210 },
       incluye:
         "Aceite (elección de marca por el cliente), filtro de aceite, filtro de aire, revisión de líquidos, revisión de frenos, revisión de suspensión, pulverizado de motor, lavado express, vehículo elevado en máquina Rotary.",
     },
     {
       id: "premium",
       nombre: "Mantenimiento premium",
-      extra: { auto: 200, camioneta: 240, suv: 260, van: 260 },
+      extra: { auto: 200, camioneta: 240, camionetaxl: 260, suv: 260, van: 260 },
       incluye:
         "Aceite (elección de marca por el cliente), filtro de aceite, filtro de aire, filtro de cabina, rellenado de líquido de parabrisas, lavado de motor completo, aspirado interior, revisión de frenos y suspensión, diagnóstico visual de fugas, lavado premium, lavado de chasis, vehículo elevado en máquina Rotary.",
+    },
+    {
+      id: "lavadosalon",
+      nombre: "Lavado de salón",
+      extra: { auto: 180, camioneta: 200, camionetaxl: 240, suv: 240, van: 250 },
+      sinAceite: true,
+      incluye: "Lavado de motor, chasis, guardafangos, habitáculo completo, tablero, cristales, encerado premium y llantas.",
+      detalle: `🚗 1. Motor y Chasis (Zonas Externas / Mecánicas)
+• Lavado de motor: Desengrase profundo, limpieza detallada y aplicación de protector/abrillantador para plásticos y mangueras.
+• Lavado de chasis: Limpieza a presión de la zona inferior del vehículo para retirar barro, grasa y salinidad.
+• Limpieza de guardafangos internos: Lavado a presión y cepillado del interior de los pasos de rueda, eliminando suciedad acumulada.
+🧽 2. Habitáculo e Interior
+• Desmontaje: Retiro de asientos para máxima accesibilidad.
+• Techo (Cielo raso): Limpieza delicada a mano o vapor para remover manchas y olores.
+• Asientos / Tapicería: Lavado profundo de tela o cuero y desinfección.
+• Lavado de cinturones de seguridad: Extracción total, lavado y cepillado de la cinta para remover grasa y sudor, seguido de secado completo.
+• Alfombras y pisos: Aspirado industrial y lavado profundo del piso del vehículo.
+• Tapetes / Alfombrillas: Lavado, cepillado y secado fuera del auto.
+• Maletera: Vaciado, aspirado profundo y lavado de la base y laterales.
+🎛️ 3. Tablero, Plásticos y Detalles Interior
+• Tablero y consola central: Limpieza de rejillas de aire, botones y pantallas, con aplicación de protector UV (mate o satinado).
+• Paneles de puertas: Limpieza de molduras, bolsillos portavasos y botoneras de lunas.
+• Cunas y rieles: Limpieza de los rieles de los asientos y zonas de difícil acceso.
+🪟 4. Cristales y Tratamiento
+• Limpieza interna de lunas: Eliminación de grasa y huellas en todos los cristales.
+• Aplicación de líquido antiempañante: Tratamiento especial en la cara interna del parabrisas delantero para evitar que se nuble con el cambio de temperatura.
+✨ 5. Lavado Exterior y Encerado Premium
+• Lavado exterior: Champú automotriz ph neutro para retirar polvo y suciedad de la carrocería.
+• Secado técnico: Uso de microfibras de alta absorción y aire a presión en ranuras para evitar marcas de agua.
+• Aplicación de cera premium: Encerado de carrocería utilizando productos de alta gama según la pintura (Sonax, Meguiar's, Auto Premium o Vonixx) para un brillo profundo y protección hidrofóbica.
+• Acabado de llantas: Limpieza y aplicación de abrillantador/renovador de neumáticos.`,
     },
   ],
   aceites: [
@@ -2826,6 +2858,14 @@ function EditorPlanes({ planes, tiposVehiculo, setConfig }) {
             onChange={(e) => updatePlan(i, { incluye: e.target.value })}
             placeholder="Qué incluye este servicio"
           />
+          {p.detalle && (
+            <textarea
+              className={`${inputCls} h-40`}
+              value={p.detalle || ""}
+              onChange={(e) => updatePlan(i, { detalle: e.target.value })}
+              placeholder="Detalle que se envía tal cual al cliente"
+            />
+          )}
           <div className="rounded-lg border border-slate-100 bg-slate-50 p-2 space-y-1.5">
             <p className="text-[11px] font-semibold text-slate-600">Opciones: el cliente elige una (vacío = sin opciones)</p>
             {(p.opciones || []).map((o) => (
@@ -2978,7 +3018,8 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
   const subtotal = totalAceite + sobreprecio + extrasTotal;
   const descuento = Math.min(Number(form.descuento || 0), subtotal);
   const total = subtotal - descuento;
-  const listo = !!plan && !!aceite && litros > 0 && capacidad > 0 && !faltaPrecio;
+  const pideAceite = !plan?.sinAceite;
+  const listo = !!plan && (!pideAceite || (!!aceite && litros > 0 && capacidad > 0)) && !faltaPrecio;
   const sinOpcion = opciones.length > 0 && !opcionElegida;
 
   // El mensaje al cliente lista todo lo que incluye el servicio y el aceite
@@ -2986,10 +3027,12 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
   const mensaje = (nombre) => {
     const tipoNombre = tiposVehiculo.find((t) => t.id === form.tipoVeh)?.nombre || "";
     const vehTxt = [form.marca, form.modelo, form.anio].filter(Boolean).join(" ");
-    const incluye = String(plan?.incluye || "")
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean);
+    const incluye = plan?.detalle
+      ? []
+      : String(plan?.incluye || "")
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean);
     const aceiteLinea = !aceite
       ? ""
       : `Aceite ${aceite.nombre} (${galones} galón${galones === 1 ? "" : "es"} de ${capacidad} L${
@@ -3004,8 +3047,8 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
         .join(" "),
       "",
       `*${plan?.nombre || "Servicio"}*`,
-      ...incluye.map((x) => `• ${x}`),
-      ...(opcionElegida ? [`• ${opcionElegida.nombre}`] : []),
+      ...(plan?.detalle ? [plan.detalle] : incluye.map((x) => `• ${x}`)),
+      ...(plan?.detalle && opcionElegida ? [opcionElegida.nombre] : opcionElegida ? [`• ${opcionElegida.nombre}`] : []),
       aceiteLinea && `• ${aceiteLinea}`,
       ...extrasSel.map((x) => `• ${x.nombre}`),
       "",
@@ -3019,9 +3062,9 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
 
   const guardar = async (abrirWhatsApp) => {
     if (!plan) return notify("Elige el tipo de servicio");
-    if (!aceite) return notify("Elige el aceite");
-    if (!litros) return notify("Escribe o busca los litros del vehículo");
-    if (!capacidad) return notify("Este aceite no tiene capacidad definida. El administrador debe corregirlo en la pestaña Precios.");
+    if (pideAceite && !aceite) return notify("Elige el aceite");
+    if (pideAceite && !litros) return notify("Escribe o busca los litros del vehículo");
+    if (pideAceite && !capacidad) return notify("Este aceite no tiene capacidad definida. El administrador debe corregirlo en la pestaña Precios.");
     if (faltaPrecio) return notify(`Falta el sobreprecio de ${tiposVehiculo.find((t) => t.id === form.tipoVeh)?.nombre}. Pídele al administrador que lo ponga en la pestaña Precios.`);
     if (sinOpcion) return notify("Elige una de las opciones del servicio");
     const nombre = form.nombre.trim();
@@ -3043,7 +3086,7 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
         litros,
         plan: plan.nombre,
         opcion: opcionElegida ? opcionElegida.nombre : "",
-        aceite: aceite.nombre,
+        aceite: aceite ? aceite.nombre : "",
         precioLitro: calculo.precioLitro,
         galones,
         litrosExtra: sobra,
@@ -3144,9 +3187,11 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
               ))}
             </select>
           </Field>
-          <Field label="Litros de aceite">
-            <input className={inputCls} type="number" step="0.1" value={form.litros} onChange={(e) => setForm({ ...form, litros: e.target.value })} placeholder="8" />
-          </Field>
+          {pideAceite && (
+            <Field label="Litros de aceite">
+              <input className={inputCls} type="number" step="0.1" value={form.litros} onChange={(e) => setForm({ ...form, litros: e.target.value })} placeholder="8" />
+            </Field>
+          )}
         </div>
 
         <div>
@@ -3164,10 +3209,13 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
                   {form.planId === p.id && <Check size={13} className="text-teal-700" />}
                   {p.nombre}
                   <span className="font-normal text-slate-500">
-                    (aceite + {soles(Number(p.extra?.[form.tipoVeh] || 0))})
+                    ({p.sinAceite ? "" : "aceite + "}
+                    {soles(Number(p.extra?.[form.tipoVeh] || 0))})
                   </span>
                 </p>
-                <p className="text-[11px] text-slate-500 mt-0.5">{p.incluye}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
+                  {p.detalle ? "Detalle completo del lavado (se envía tal cual al cliente)" : p.incluye}
+                </p>
               </button>
             ))}
           </div>
@@ -3195,21 +3243,23 @@ function Cotizaciones({ clientes, cotizaciones, setCotizaciones, configCotList, 
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Aceite (galón)">
-            <select className={inputCls} value={form.aceiteId} onChange={(e) => setForm({ ...form, aceiteId: e.target.value })}>
-              <option value="">— Elegir —</option>
-              {gruposAceites(cfg.aceites).map((g) => (
-                <optgroup key={g.grupo} label={g.grupo}>
-                  {g.aceites.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.nombre} · {soles(ventaEnvase(a))}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </Field>
+        <div className={`grid gap-2 ${pideAceite ? "grid-cols-2" : "grid-cols-1"}`}>
+          {pideAceite && (
+            <Field label="Aceite (galón)">
+              <select className={inputCls} value={form.aceiteId} onChange={(e) => setForm({ ...form, aceiteId: e.target.value })}>
+                <option value="">— Elegir —</option>
+                {gruposAceites(cfg.aceites).map((g) => (
+                  <optgroup key={g.grupo} label={g.grupo}>
+                    {g.aceites.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.nombre} · {soles(ventaEnvase(a))}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="Descuento (S/)">
             <input className={inputCls} type="number" value={form.descuento} onChange={(e) => setForm({ ...form, descuento: e.target.value })} placeholder="0" />
           </Field>
